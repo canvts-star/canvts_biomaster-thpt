@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BioMaster THPT - Thầy Trương Trung Can</title>
+  <title>BioMaster THPT - Chuyên Sâu Sinh Học - Thầy Trương Trung Can</title>
   <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- React & ReactDOM 18 -->
@@ -14,9 +14,9 @@
   <!-- Thư viện đọc PDF.js & Mammoth.js (.docx) -->
   <script crossorigin="anonymous" src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <script crossorigin="anonymous" src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
-  <!-- Thư viện JSZip đọc trực tiếp lõi XML màu đỏ & gạch dưới trong file .docx -->
+  <!-- Thư viện JSZip đọc trực tiếp XML trong file .docx -->
   <script crossorigin="anonymous" src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-  <!-- Thư viện OCR Tesseract.js đọc chữ trong khung/ảnh của file PDF -->
+  <!-- Thư viện OCR Tesseract.js -->
   <script crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
@@ -33,7 +33,6 @@
   <script type="text/babel">
     const { useState, useEffect, useMemo, useCallback, Component } = React;
 
-    // ErrorBoundary bắt lỗi giao diện an toàn
     class ErrorBoundary extends Component {
       constructor(props) {
         super(props);
@@ -41,9 +40,6 @@
       }
       static getDerivedStateFromError(error) {
         return { hasError: true, errorMessage: error?.message || 'Lỗi hiển thị giao diện.' };
-      }
-      componentDidCatch(error, info) {
-        console.error('ErrorBoundary caught:', error, info);
       }
       render() {
         if (this.state.hasError) {
@@ -64,15 +60,11 @@
       }
     }
 
-    // Cấu hình PDF.js worker an toàn
     if (window.pdfjsLib && window.pdfjsLib.GlobalWorkerOptions) {
       window.pdfjsLib.GlobalWorkerOptions.workerSrc =
         'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
     }
 
-    // =========================================================================
-    // 1. CHUẨN HÓA UNICODE TIẾNG VIỆT & ĐỌC FILE PDF / WORD (.DOCX)
-    // =========================================================================
     function cleanVietnameseUnicode(str) {
       if (!str) return '';
       return String(str)
@@ -90,7 +82,6 @@
       const r = parseInt(clean.slice(0, 2), 16);
       const g = parseInt(clean.slice(2, 4), 16);
       const b = parseInt(clean.slice(4, 6), 16);
-      // Nhận diện màu đỏ (r chiếm ưu thế) hoặc các màu tô nổi bật (xanh dương đậm, tím, cam...)
       if (r >= 130 && r > g + 45 && r > b + 45) return true;
       if (b >= 140 && b > r + 50 && b > g + 30) return true;
       return false;
@@ -112,15 +103,9 @@
           let hasGraphicsOrTable = false;
           const redOrUnderlineYCoords = [];
 
-          // Quét OperatorList của PDF để tìm tọa độ Y có chữ màu đỏ hoặc đường gạch dưới
           if (ops && Array.isArray(ops.fnArray) && window.pdfjsLib.OPS) {
             const OPS = window.pdfjsLib.OPS;
-            const imgOps = [
-              OPS.paintImageXObject,
-              OPS.paintInlineImageXObject,
-              OPS.paintJpegXObject,
-              OPS.paintImageMaskXObject
-            ];
+            const imgOps = [OPS.paintImageXObject, OPS.paintInlineImageXObject, OPS.paintJpegXObject, OPS.paintImageMaskXObject];
             let curIsRed = false;
             let curY = 0;
 
@@ -135,19 +120,10 @@
                 const g255 = g <= 1 ? Math.round(g * 255) : g;
                 const b255 = b <= 1 ? Math.round(b * 255) : b;
                 curIsRed = (r255 >= 130 && r255 > g255 + 45 && r255 > b255 + 45);
-              } else if (fn === OPS.setFillCMYKColor || fn === OPS.setStrokeCMYKColor) {
-                const [c, m, y, bl] = args;
-                curIsRed = (m > 0.5 && y > 0.4 && c < 0.3 && bl < 0.4);
               } else if (fn === OPS.setTextMatrix && args.length >= 6) {
                 curY = args[5];
               } else if ((fn === OPS.showText || fn === OPS.showSpacedText) && curIsRed) {
                 redOrUnderlineYCoords.push(curY);
-              } else if (fn === OPS.constructPath && Array.isArray(args[1])) {
-                // Kiểm tra nét gạch ngang ngắn (gạch dưới đáp án)
-                const coords = args[1];
-                if (coords.length >= 4 && Math.abs(coords[1] - coords[3]) < 1.5 && Math.abs(coords[0] - coords[2]) >= 8 && Math.abs(coords[0] - coords[2]) <= 260) {
-                  redOrUnderlineYCoords.push(coords[1]);
-                }
               }
             }
           }
@@ -168,38 +144,23 @@
               currentLine = [];
             }
             const isMarkedY = redOrUnderlineYCoords.some(ry => Math.abs(ry - y) < 6);
-            const strVal = isMarkedY && /^[A-D][\.\:\)]/.test(item.str.trim())
-              ? `[[ANS_MARK]]${item.str}`
-              : item.str;
+            const strVal = isMarkedY && /^[A-D][\.\:\)]/.test(item.str.trim()) ? `[[ANS_MARK]]${item.str}` : item.str;
             currentLine.push(strVal);
             lastY = y;
           });
           if (currentLine.length > 0) lines.push(currentLine.join(' '));
 
           let pageText = cleanVietnameseUnicode(lines.join('\n')).trim();
-
           if (hasGraphicsOrTable || pageText.length < 200) {
-            if (onProgress) onProgress(`Đang trích xuất bảng số liệu & hình ảnh Trang ${p}/${pdf.numPages}...`);
+            if (onProgress) onProgress(`Đang trích xuất dữ liệu Trang ${p}/${pdf.numPages}...`);
             const viewport = page.getViewport({ scale: 1.8 });
             const canvas = document.createElement('canvas');
             canvas.width = viewport.width;
             canvas.height = viewport.height;
             const ctx = canvas.getContext('2d');
             await page.render({ canvasContext: ctx, viewport }).promise;
-
-            if (hasGraphicsOrTable) {
-              pageImages[p] = canvas.toDataURL('image/png');
-            }
-
-            if (pageText.length < 200 && window.Tesseract) {
-              const ocrRes = await window.Tesseract.recognize(canvas, 'vie+eng');
-              const ocrText = cleanVietnameseUnicode(ocrRes?.data?.text || '').trim();
-              if (ocrText.length > pageText.length) {
-                pageText = ocrText;
-              }
-            }
+            if (hasGraphicsOrTable) pageImages[p] = canvas.toDataURL('image/png');
           }
-
           fullText += `\n[[PAGE_${p}]]\n` + pageText;
         }
         return { text: fullText.trim(), pageImages };
@@ -212,254 +173,68 @@
     async function extractTextFromDocxFile(file) {
       try {
         const arrayBuffer = await file.arrayBuffer();
-
-        // BƯỚC 1: ĐỌC TRỰC TIẾP LÕI XML CỦA FILE WORD (.DOCX) QUA JSZIP ĐỂ BẮT CHÍNH XÁC MÀU ĐỎ & GẠCH DƯỚI
         let xmlExtractedText = '';
-        const xmlAnswerHints = {};
+        const answerHints = {};
         if (window.JSZip) {
           try {
             const zip = await window.JSZip.loadAsync(arrayBuffer);
             const docXmlStr = await zip.file('word/document.xml')?.async('string');
-            const stylesXmlStr = await zip.file('word/styles.xml')?.async('string');
-
-            // Đọc các style có quy định màu đỏ hoặc gạch dưới trong word/styles.xml
-            const markedStyleIds = new Set();
-            if (stylesXmlStr) {
-              const sDoc = new DOMParser().parseFromString(stylesXmlStr, 'application/xml');
-              sDoc.querySelectorAll('style').forEach(st => {
-                const stId = st.getAttribute('w:styleId') || st.getAttribute('styleId');
-                const colorEl = st.querySelector('rPr > color');
-                const uEl = st.querySelector('rPr > u');
-                const colorVal = colorEl?.getAttribute('w:val') || colorEl?.getAttribute('val');
-                const uVal = uEl?.getAttribute('w:val') || uEl?.getAttribute('val');
-                if ((colorVal && isRedOrHighlightHex(colorVal)) || (uEl && uVal !== 'none')) {
-                  if (stId) markedStyleIds.add(stId);
-                }
-              });
-            }
-
             if (docXmlStr) {
               const xmlDoc = new DOMParser().parseFromString(docXmlStr, 'application/xml');
               const paragraphs = Array.from(xmlDoc.getElementsByTagName('w:p'));
               const pLines = [];
-
               paragraphs.forEach(p => {
                 const runs = Array.from(p.getElementsByTagName('w:r'));
                 let lineStr = '';
                 runs.forEach(r => {
                   const rPr = r.getElementsByTagName('w:rPr')[0];
-                  let isMarkedRun = false;
+                  let isMarked = false;
                   if (rPr) {
-                    const colorEl = rPr.getElementsByTagName('w:color')[0];
+                    const cEl = rPr.getElementsByTagName('w:color')[0];
                     const uEl = rPr.getElementsByTagName('w:u')[0];
-                    const hlEl = rPr.getElementsByTagName('w:highlight')[0];
-                    const rStyleEl = rPr.getElementsByTagName('w:rStyle')[0];
-
-                    const cVal = colorEl?.getAttribute('w:val') || colorEl?.getAttribute('val');
-                    const uVal = uEl?.getAttribute('w:val') || uEl?.getAttribute('val');
-                    const hlVal = hlEl?.getAttribute('w:val') || hlEl?.getAttribute('val');
-                    const stVal = rStyleEl?.getAttribute('w:val') || rStyleEl?.getAttribute('val');
-
-                    if (cVal && isRedOrHighlightHex(cVal)) isMarkedRun = true;
-                    if (uEl && uVal !== 'none') isMarkedRun = true;
-                    if (hlEl && hlVal && hlVal !== 'none' && hlVal !== 'white') isMarkedRun = true;
-                    if (stVal && markedStyleIds.has(stVal)) isMarkedRun = true;
+                    const cVal = cEl?.getAttribute('w:val') || cEl?.getAttribute('val');
+                    if ((cVal && isRedOrHighlightHex(cVal)) || uEl) isMarked = true;
                   }
-
                   const tNodes = Array.from(r.getElementsByTagName('w:t'));
                   const rText = tNodes.map(t => t.textContent || '').join('');
-                  if (rText) {
-                    lineStr += isMarkedRun ? `[[ANS_MARK]]${rText}` : rText;
-                  }
+                  if (rText) lineStr += isMarked ? `[[ANS_MARK]]${rText}` : rText;
                 });
                 if (lineStr.trim()) pLines.push(lineStr);
               });
-
               xmlExtractedText = cleanVietnameseUnicode(pLines.join('\n'));
             }
-          } catch (xmlErr) {
-            console.warn('Không đọc được XML trực tiếp, chuyển sang Mammoth:', xmlErr);
-          }
+          } catch (e) {}
         }
-
-        // BƯỚC 2: DÙNG MAMMOTH LẤY BẢNG BIỂU, HÌNH ẢNH & BẢNG ĐÁP ÁN CUỐI ĐỀ
-        if (!window.mammoth) {
-          return { text: xmlExtractedText, richBlocks: {}, answerHints: xmlAnswerHints };
-        }
-
-        const htmlResult = await window.mammoth.convertToHtml({
-          arrayBuffer,
-          styleMap: [
-            "u => u",
-            "b => strong",
-            "i => em"
-          ]
-        });
-
-        if (htmlResult && htmlResult.value) {
-          const wrapper = document.createElement('div');
-          wrapper.innerHTML = cleanVietnameseUnicode(htmlResult.value);
-
-          const richBlocks = {};
-          const answerHints = { ...xmlAnswerHints };
-          let blockIdx = 0;
-
-          // Xử lý bảng biểu: tách Bảng đáp án riêng và giữ nguyên Bảng số liệu câu hỏi
-          wrapper.querySelectorAll('table').forEach(tbl => {
-            const rows = Array.from(tbl.querySelectorAll('tr')).map(tr =>
-              Array.from(tr.querySelectorAll('td, th')).map(cell => cell.textContent.replace(/\[\[ANS_MARK\]\]/g, '').trim())
-            );
-
-            let isAnswerTable = false;
-            const tableAnswerMap = {};
-
-            for (let r = 0; r < rows.length - 1; r++) {
-              const nums = rows[r].map(c => parseInt(c.replace(/\D/g, ''), 10));
-              const letters = rows[r + 1].map(c => c.replace(/[^A-Da-d]/g, '').toUpperCase());
-              const validPairs = nums.filter((n, idx) => !isNaN(n) && n >= 1 && n <= 60 && ['A', 'B', 'C', 'D'].includes(letters[idx]));
-              if (validPairs.length >= 3) {
-                isAnswerTable = true;
-                nums.forEach((n, idx) => {
-                  if (!isNaN(n) && n >= 1 && n <= 60 && ['A', 'B', 'C', 'D'].includes(letters[idx])) {
-                    tableAnswerMap[n] = letters[idx];
-                  }
-                });
-              }
-            }
-
-            rows.forEach(row => {
-              row.forEach(cell => {
-                const m = cell.match(/^(?:Câu|Question)?\s*(\d{1,2})\s*[\.:\-\)]\s*([A-D])$/i);
-                if (m) {
-                  tableAnswerMap[parseInt(m[1], 10)] = m[2].toUpperCase();
-                  isAnswerTable = true;
-                }
-              });
-              for (let c = 0; c < row.length - 1; c += 2) {
-                const qM = row[c].match(/^(?:Câu|Question)?\s*(\d{1,2})\s*[\.:\)]?$/i);
-                const aM = row[c + 1].match(/^([A-D])$/i);
-                if (qM && aM) {
-                  tableAnswerMap[parseInt(qM[1], 10)] = aM[1].toUpperCase();
-                  isAnswerTable = true;
-                }
-              }
-            });
-
-            if (isAnswerTable) {
-              Object.assign(answerHints, tableAnswerMap);
-              tbl.remove();
-            } else {
-              blockIdx++;
-              const token = `[[RICH_BLOCK_${blockIdx}]]`;
-              tbl.style.borderCollapse = 'collapse';
-              tbl.style.width = '100%';
-              tbl.style.margin = '8px 0';
-              tbl.querySelectorAll('td, th').forEach(cell => {
-                cell.style.border = '1px solid #94a3b8';
-                cell.style.padding = '4px 8px';
-              });
-              richBlocks[token] = tbl.outerHTML;
-              tbl.replaceWith(document.createTextNode(`\n${token}\n`));
-            }
-          });
-
-          // Giữ nguyên hình ảnh nhúng trong file Word
-          wrapper.querySelectorAll('img').forEach(img => {
-            blockIdx++;
-            const token = `[[RICH_BLOCK_${blockIdx}]]`;
-            img.style.maxWidth = '100%';
-            img.style.height = 'auto';
-            img.style.margin = '8px 0';
-            richBlocks[token] = img.outerHTML;
-            img.replaceWith(document.createTextNode(`\n${token}\n`));
-          });
-
-          wrapper.querySelectorAll('p, div, li, h1, h2, h3, h4, br').forEach(el => {
-            el.insertAdjacentText('afterend', '\n');
-          });
-
-          const mammothText = cleanVietnameseUnicode(wrapper.textContent || '');
-          // Ưu tiên dùng văn bản trích xuất từ XML (đã gắn [[ANS_MARK]] chính xác tại mọi chữ màu đỏ / gạch dưới)
-          const finalDocxText = xmlExtractedText.includes('[[ANS_MARK]]') ? xmlExtractedText : mammothText;
-          return { text: finalDocxText, richBlocks, answerHints };
-        }
-
-        return { text: xmlExtractedText, richBlocks: {}, answerHints: xmlAnswerHints };
+        return { text: xmlExtractedText, richBlocks: {}, answerHints };
       } catch (err) {
-        console.error('Lỗi đọc DOCX:', err);
         return { text: '', richBlocks: {}, answerHints: {} };
       }
     }
 
-    // Trích xuất bảng đáp án từ văn bản thô (hỗ trợ cả file PDF & Word có BẢNG ĐÁP ÁN ở cuối đề)
     function extractAnswerKeyFromRawText(rawText, preDetectedMap = {}) {
       const ansMap = { ...preDetectedMap };
       if (!rawText) return ansMap;
-
       const clean = cleanVietnameseUnicode(rawText).replace(/\[\[ANS_MARK\]\]/g, '');
-      const keySectionMatch = clean.split(/\n\s*(?:BẢNG\s+ĐÁP\s+ÁN|ĐÁP\s+ÁN\s+CHI\s+TIẾT|ĐÁP\s+ÁN|ANSWER\s+KEY|HƯỚNG\s+DẪN\s+GIẢI)\b/i);
-      const targetText = keySectionMatch.length > 1 ? keySectionMatch.slice(1).join('\n') : clean;
-
-      // 1. Dạng liệt kê: 1.A 2.B hoặc 1-A, 2-B hoặc Câu 1: A
-      const pairRegex = /(?:^|\s|\||\(|\b)(?:Câu|Question|Q)?\s*(\d{1,2})\s*(?:[\.:\-\)\/\s])\s*([A-D])(?=\s|$|\||,|;|\)|\.|\b)/gi;
+      const pairRegex = /(?:^|\s|\||\(|\b)(?:Câu|Q)?\s*(\d{1,2})\s*(?:[\.:\-\)\/\s])\s*([A-D])(?=\s|$|\||,|;|\)|\.|\b)/gi;
       let m;
-      while ((m = pairRegex.exec(targetText)) !== null) {
+      while ((m = pairRegex.exec(clean)) !== null) {
         const qNum = parseInt(m[1], 10);
-        if (qNum >= 1 && qNum <= 60 && !ansMap[qNum]) {
-          ansMap[qNum] = m[2].toUpperCase();
-        }
+        if (qNum >= 1 && qNum <= 60 && !ansMap[qNum]) ansMap[qNum] = m[2].toUpperCase();
       }
-
-      // 2. Dạng bảng 2 hàng tách rời trong PDF: Hàng số [1 2 3...] ngay trên hàng chữ cái [A C D...]
-      const lines = targetText.split('\n').map(l => l.trim()).filter(Boolean);
-      for (let i = 0; i < lines.length - 1; i++) {
-        const nums = lines[i].match(/\b\d{1,2}\b/g);
-        const letters = lines[i + 1].match(/\b[A-D]\b/g);
-        if (nums && letters && nums.length >= 3 && nums.length === letters.length) {
-          nums.forEach((nStr, idx) => {
-            const qNum = parseInt(nStr, 10);
-            if (qNum >= 1 && qNum <= 60) {
-              ansMap[qNum] = letters[idx].toUpperCase();
-            }
-          });
-        }
-      }
-
-      // 3. Dạng chuỗi đáp án liên tiếp ở cuối đề (1A 2C 3D 4B...)
-      const compactRegex = /\b(\d{1,2})([A-D])\b/g;
-      let cm;
-      while ((cm = compactRegex.exec(targetText)) !== null) {
-        const qNum = parseInt(cm[1], 10);
-        if (qNum >= 1 && qNum <= 60 && !ansMap[qNum]) {
-          ansMap[qNum] = cm[2].toUpperCase();
-        }
-      }
-
       return ansMap;
     }
 
-    // =========================================================================
-    // 2. BỘ PHÂN TÍCH ĐỀ THI & SINH ĐỀ HOÀN CHỈNH / ĐỀ TƯƠNG TỰ
-    // =========================================================================
-    function parseAndGenerateSimilarFromText(rawText, subject, grade, topic, options = {}) {
+    function parseAndGenerateSimilarFromText(rawText, grade, topic, options = {}) {
       const { richBlocks = {}, pageImages = {}, answerHints = {}, mode = 'similar' } = options;
-      const isEnglish = subject === 'Tiếng Anh';
       const normalized = cleanVietnameseUnicode(rawText);
       const answerKeyMap = extractAnswerKeyFromRawText(normalized, answerHints);
+      const bodyOnly = normalized.split(/\n\s*(?:BẢNG\s+ĐÁP\s+ÁN|ĐÁP\s+ÁN)\b/i)[0];
 
-      // Cắt bỏ phần bảng đáp án ở cuối để không bị nhận nhầm thành câu hỏi
-      const bodyOnly = normalized.split(/\n\s*(?:BẢNG\s+ĐÁP\s+ÁN|ĐÁP\s+ÁN\s+CHI\s+TIẾT|ANSWER\s+KEY|HƯỚNG\s+DẪN\s+GIẢI)\b/i)[0];
-
-      // Tìm vị trí từng câu hỏi: Câu 1., Câu 1:, Question 1., 1., 1)
       const regexSplit = /(?:^|\n)\s*(?:Câu|Question)\s*(\d{1,2})\s*[\.:\)]\s*/gi;
       const matches = [];
       let m;
       while ((m = regexSplit.exec(bodyOnly)) !== null) {
-        matches.push({
-          qNum: parseInt(m[1], 10),
-          start: m.index,
-          contentStart: m.index + m[0].length
-        });
+        matches.push({ qNum: parseInt(m[1], 10), start: m.index, contentStart: m.index + m[0].length });
       }
 
       const results = [];
@@ -469,38 +244,19 @@
         const rawBlock = bodyOnly.slice(curMatch.contentStart, nextMatch ? nextMatch.start : bodyOnly.length).trim();
         if (!rawBlock) continue;
 
-        // Kiểm tra xem câu này thuộc trang PDF nào (nếu có)
-        const textBefore = bodyOnly.slice(0, curMatch.start);
-        const pageMarkers = Array.from(textBefore.matchAll(/\[\[PAGE_(\d+)\]\]/g));
-        const currentPageNum = pageMarkers.length > 0 ? parseInt(pageMarkers[pageMarkers.length - 1][1], 10) : 1;
-        const pageImg = pageImages[currentPageNum] || null;
+        const cleanedBlock = rawBlock.replace(/\[\[RICH_BLOCK_(\d+)\]\]/g, '').replace(/\[\[PAGE_\d+\]\]/g, '').trim();
 
-        // Tách các khối bảng biểu / hình ảnh Word ([[RICH_BLOCK_x]])
-        let matchedRichHtml = '';
-        const cleanedBlock = rawBlock.replace(/\[\[RICH_BLOCK_(\d+)\]\]/g, (tok) => {
-          if (richBlocks[tok]) matchedRichHtml += richBlocks[tok];
-          return '';
-        }).replace(/\[\[PAGE_\d+\]\]/g, '').trim();
-
-        // Tìm vị trí 4 phương án A., B., C., D. (cho phép có [[ANS_MARK]] nằm trước hoặc ngay sau chữ cái phương án)
         const findMarkerPos = (letter, searchFrom) => {
           const re = new RegExp(`(?:^|\\n|\\s)(?:\\[\\[ANS_MARK\\]\\]\\s*)*(\\*?)${letter}\\s*(?:\\[\\[ANS_MARK\\]\\]\\s*)*[\\.:\\)]\\s*(?:\\[\\[ANS_MARK\\]\\]\\s*)*`, 'g');
           re.lastIndex = searchFrom;
           const found = re.exec(cleanedBlock);
-          return found
-            ? {
-                start: found.index,
-                contentStart: found.index + found[0].length,
-                markerMarked: found[0].includes('[[ANS_MARK]]') || found[1] === '*'
-              }
-            : null;
+          return found ? { start: found.index, contentStart: found.index + found[0].length, markerMarked: found[0].includes('[[ANS_MARK]]') || found[1] === '*' } : null;
         };
 
         const posA = findMarkerPos('A', 0);
         const posB = posA ? findMarkerPos('B', posA.contentStart) : null;
         const posC = posB ? findMarkerPos('C', posB.contentStart) : null;
         const posD = posC ? findMarkerPos('D', posC.contentStart) : null;
-
         const qNum = curMatch.qNum;
 
         if (posA && posB && posC && posD) {
@@ -515,40 +271,20 @@
           let markedCorrectIdx = -1;
           const markerFlags = [posA.markerMarked, posB.markerMarked, posC.markerMarked, posD.markerMarked];
           const cleanOpts = rawOpts.map((optStr, oIdx) => {
-            if (markerFlags[oIdx] || optStr.includes('[[ANS_MARK]]')) {
-              markedCorrectIdx = oIdx;
-            }
+            if (markerFlags[oIdx] || optStr.includes('[[ANS_MARK]]')) markedCorrectIdx = oIdx;
             return optStr.replace(/\[\[ANS_MARK\]\]/g, '').replace(/\s+/g, ' ').trim();
           });
 
-          // Nếu chế độ là 'similar' và không phải Tiếng Anh, biến đổi nhẹ số liệu độc lập trong đề dẫn
           let finalQuestionText = questionStemRaw;
-          if (mode === 'similar' && !isEnglish && !matchedRichHtml && !pageImg) {
+          if (mode === 'similar') {
             finalQuestionText = finalQuestionText.replace(/\b(\d+)\b/g, (numStr) => {
               const v = parseInt(numStr, 10);
-              if (v >= 12 && v <= 2000 && v !== 2018 && v !== 2025 && v !== 2026) {
-                return String(v * 2);
-              }
+              if (v >= 12 && v <= 2000 && v !== 2018 && v !== 2025 && v !== 2026) return String(v * 2);
               return numStr;
             });
           }
 
-          let detectedOrigCorrect = -1;
-          let answerSourceNote = '';
-          if (markedCorrectIdx >= 0) {
-            detectedOrigCorrect = markedCorrectIdx;
-            answerSourceNote = 'Nhận diện từ đánh dấu màu / gạch dưới / in đậm';
-          } else if (answerKeyMap[qNum]) {
-            detectedOrigCorrect = Math.max(0, ['A', 'B', 'C', 'D'].indexOf(answerKeyMap[qNum]));
-            answerSourceNote = `Nhận diện từ Bảng đáp án (${answerKeyMap[qNum]})`;
-          } else if (answerKeyMap[idx + 1]) {
-            detectedOrigCorrect = Math.max(0, ['A', 'B', 'C', 'D'].indexOf(answerKeyMap[idx + 1]));
-            answerSourceNote = `Nhận diện từ Bảng đáp án (${answerKeyMap[idx + 1]})`;
-          } else {
-            detectedOrigCorrect = 0;
-            answerSourceNote = '⚠️ File gốc chưa có bảng đáp án / tô màu (tạm đặt A)';
-          }
-
+          let detectedOrigCorrect = markedCorrectIdx >= 0 ? markedCorrectIdx : (answerKeyMap[qNum] ? ['A', 'B', 'C', 'D'].indexOf(answerKeyMap[qNum]) : 0);
           const originalCorrectText = cleanOpts[detectedOrigCorrect];
           let finalOptions = [...cleanOpts];
           let finalCorrect = detectedOrigCorrect;
@@ -560,58 +296,30 @@
 
           results.push({
             id: `${mode === 'exact' ? 'EXACT' : 'SIM'}_${Date.now()}_${idx + 1}`,
-            subject,
+            subject: 'Sinh học',
             grade,
             topic,
             type: 'mcq',
             question: finalQuestionText,
             options: finalOptions,
             correct: finalCorrect,
-            richHtml: matchedRichHtml,
-            pageImage: pageImg,
-            explanation: `${mode === 'exact' ? '[Đề gốc]' : '[Đề tương tự]'} ${answerSourceNote}. Đáp án đúng: ${String.fromCharCode(65 + finalCorrect)}.`
-          });
-        } else {
-          const cleanStem = cleanedBlock.replace(/\[\[ANS_MARK\]\]/g, '').trim();
-          results.push({
-            id: `${mode === 'exact' ? 'EXACT' : 'SIM'}_${Date.now()}_${idx + 1}`,
-            subject,
-            grade,
-            topic,
-            type: isEnglish ? 'mcq' : 'sa',
-            question: cleanStem,
-            options: isEnglish ? ['Option A', 'Option B', 'Option C', 'Option D'] : undefined,
-            correct: isEnglish ? 0 : undefined,
-            correctAnswer: !isEnglish ? (answerKeyMap[qNum] || answerKeyMap[idx + 1] || '100') : undefined,
-            richHtml: matchedRichHtml,
-            pageImage: pageImg,
-            explanation: `${mode === 'exact' ? '[Đề gốc]' : '[Đề tương tự]'} Đã giữ nguyên dữ liệu câu hỏi.`
+            explanation: `[Đề sinh học] Đáp án đúng: ${String.fromCharCode(65 + finalCorrect)}.`
           });
         }
       }
       return results;
     }
 
-    function downloadExamAsWordDoc(examTitle, examCode, teacherName, timeAllowed, subject, grade, questionsList) {
-      const isEnglish = subject === 'Tiếng Anh';
-      const labelWord = isEnglish ? 'Question' : 'Câu';
+    function downloadExamAsWordDoc(examTitle, examCode, teacherName, timeAllowed, grade, questionsList) {
       const questionsHtml = questionsList.map((q, idx) => {
         const optsHtml = (q.options || []).map((opt, oi) =>
           `<div style="margin-left:20px;margin-top:3px;"><b>${String.fromCharCode(65 + oi)}.</b> ${opt}</div>`
         ).join('');
-        const imgHtml = q.pageImage ? `<div style="margin:6px 0;"><img src="${q.pageImage}" style="max-width:480px;height:auto;" /></div>` : '';
-        return `
-          <div style="margin-bottom:12px;">
-            <div><b>${labelWord} ${idx + 1}:</b> ${q.question}</div>
-            ${q.richHtml ? `<div>${q.richHtml}</div>` : ''}
-            ${imgHtml}
-            ${optsHtml}
-          </div>
-        `;
+        return `<div style="margin-bottom:12px;"><div><b>Câu ${idx + 1}:</b> ${q.question}</div>${optsHtml}</div>`;
       }).join('');
 
       const keyCells = questionsList.map((q, i) => {
-        const ans = q.type === 'mcq' ? String.fromCharCode(65 + (q.correct || 0)) : (q.correctAnswer || 'Đ/S');
+        const ans = q.type === 'mcq' ? String.fromCharCode(65 + (q.correct || 0)) : 'Đ/S';
         return `<td style="border:1px solid #000;padding:4px;text-align:center;"><b>${i + 1}</b><br/>${ans}</td>`;
       }).join('');
 
@@ -622,7 +330,7 @@
           <table style="width:100%;border-bottom:2px solid #000;margin-bottom:16px;">
             <tr>
               <td style="text-align:center;width:45%;"><b>SỞ GIÁO DỤC & ĐÀO TẠO</b><br/><b>${teacherName.toUpperCase()}</b></td>
-              <td style="text-align:center;width:55%;"><b>${examTitle.toUpperCase()}</b><br/>Môn: ${subject} - Khối ${grade}<br/>Thời gian: ${timeAllowed} phút | Mã đề: <b>${examCode}</b></td>
+              <td style="text-align:center;width:55%;"><b>${examTitle.toUpperCase()}</b><br/>Môn: Sinh học - Khối ${grade}<br/>Thời gian: ${timeAllowed} phút | Mã đề: <b>${examCode}</b></td>
             </tr>
           </table>
           ${questionsHtml}
@@ -636,65 +344,41 @@
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `De_${subject.replace(/\s+/g, '_')}_Ma_${examCode}.doc`;
+      a.download = `De_Sinh_Hoc_Khoi_${grade}_Ma_${examCode}.doc`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
     }
 
-    const SUBJECT_GRADE_TOPICS = {
-      'Sinh học': {
-        '10': ['Sinh học tế bào & Thành phần hóa học', 'Chuyển hóa vật chất & Năng lượng', 'Phân bào & Sinh học vi sinh vật'],
-        '11': ['Trao đổi chất & Chuyển hóa năng lượng', 'Cảm ứng & Điều hòa hoạt động', 'Sinh trưởng, phát triển & Sinh sản'],
-        '12': ['Di truyền phân tử & Cơ chế biến dị', 'Di truyền Nhiễm sắc thể & Quy luật Mendel', 'Di truyền quần thể & Công nghệ Gen', 'Tiến hóa & Học thuyết hiện đại', 'Sinh thái học & Bảo tồn môi trường']
-      },
-      'Công nghệ Nông nghiệp': {
-        '10': ['Tổng quan Nông nghiệp 4.0 & Giới thiệu cây trồng', 'Đất trồng, Phân bón & Bảo vệ thực vật'],
-        '11': ['Công nghệ Chăn nuôi Kĩ thuật cao', 'Phòng dịch bệnh & An toàn sinh học'],
-        '12': ['Công nghệ Trồng trọt Kĩ thuật cao', 'Công nghệ Chăn nuôi hiện đại', 'Lâm nghiệp & Bảo vệ Tài nguyên Rừng', 'Công nghệ Thủy sản Bền vững']
-      },
-      'Tiếng Anh': {
-        '10': ['English 10 - Đề 1 (Cấu trúc 2025+): Family & Green Living', 'English 10 - Đề 2 (Cấu trúc 2025+): Inventions & Music'],
-        '11': ['English 11 - Đề 1 (Cấu trúc 2025+): Generation Gap & ASEAN', 'English 11 - Đề 2 (Cấu trúc 2025+): Global Warming & Heritage'],
-        '12': [
-          'Đề 1 (Chuẩn Đề Chính Thức 2025 - Mã 1102): Project Farming & DIFF 2025',
-          'Đề 2 (Chuẩn Đề Chính Thức 2026 - Mã 1101): Green Hands & Psychology of Money',
-          'Đề 3 (Chuẩn Đề Minh Họa Lần 2): Meet & Seat & Humanoid Robots',
-          'Đề 4 (Đề Tương Tự Mở Rộng #1): Smart Agriculture & Eco-Tourism',
-          'Đề 5 (Đề Tương Tự Mở Rộng #2): Urban Regeneration & AI in Education'
-        ]
-      }
+    const BIOLOGY_TOPICS = {
+      '10': ['Sinh học tế bào & Thành phần hóa học', 'Chuyển hóa vật chất & Năng lượng', 'Phân bào & Sinh học vi sinh vật'],
+      '11': ['Trao đổi chất & Chuyển hóa năng lượng', 'Cảm ứng & Điều hòa hoạt động', 'Sinh trưởng, phát triển & Sinh sản'],
+      '12': ['Di truyền phân tử & Cơ chế biến dị', 'Di truyền Nhiễm sắc thể & Quy luật Mendel', 'Di truyền quần thể & Công nghệ Gen', 'Tiến hóa & Học thuyết hiện đại', 'Sinh thái học & Bảo tồn môi trường']
     };
 
     function buildInitialQuestions() {
       const bank = [];
-      Object.entries(SUBJECT_GRADE_TOPICS).forEach(([subject, gradesObj]) => {
-        Object.entries(gradesObj).forEach(([grade, topicsList]) => {
-          topicsList.forEach((topic, tIdx) => {
-            for (let i = 1; i <= 5; i++) {
-              bank.push({
-                id: `${subject.slice(0, 3).toUpperCase()}_${grade}_T${tIdx + 1}_Q${i}`,
-                subject,
-                grade,
-                topic,
-                type: 'mcq',
-                question: subject === 'Tiếng Anh'
-                  ? `[${topic}] Question ${i}: Choose the best option to complete the sentence or passage according to the 2025+ exam format.`
-                  : `[${subject} ${grade} - ${topic}] Nhận định nào sau đây là chính xác khi nghiên cứu về ${topic} (mẫu số ${i})?`,
-                options: subject === 'Tiếng Anh'
-                  ? ['Option A (Context-appropriate choice)', 'Option B (Alternative structure)', 'Option C (Correct grammatical/lexical form)', 'Option D (Distractor item)']
-                  : [
-                      `Đặc điểm đúng chuẩn chương trình GDPT 2018 (${subject} lớp ${grade})`,
-                      `Phát biểu chưa chính xác về cơ chế vận hành`,
-                      `Quá trình diễn ra độc lập không chịu tác động môi trường`,
-                      `Chỉ xuất hiện trong điều kiện phòng thí nghiệm`
-                    ],
-                correct: subject === 'Tiếng Anh' ? 2 : 0,
-                explanation: `Hướng dẫn giải chi tiết cho ${subject} lớp ${grade} - ${topic}.`
-              });
-            }
-          });
+      Object.entries(BIOLOGY_TOPICS).forEach(([grade, topicsList]) => {
+        topicsList.forEach((topic, tIdx) => {
+          for (let i = 1; i <= 6; i++) {
+            bank.push({
+              id: `BIO_${grade}_T${tIdx + 1}_Q${i}`,
+              subject: 'Sinh học',
+              grade,
+              topic,
+              type: 'mcq',
+              question: `[Sinh học ${grade} - ${topic}] Phát biểu nào sau đây là chính xác khi nghiên cứu về quá trình sinh học này (câu số ${i})?`,
+              options: [
+                `Đặc điểm đúng chuẩn chương trình Sinh học THPT (GDPT 2018)`,
+                `Phát biểu sai lệch về nguyên lý hoạt động của sinh vật`,
+                `Quá trình diễn ra tự phát không chịu sự kiểm soát của hệ thống`,
+                `Chỉ xuất hiện trong điều kiện nhân tạo phòng thí nghiệm`
+              ],
+              correct: 0,
+              explanation: `Hướng dẫn giải chi tiết cho chuyên đề ${topic} (Sinh học lớp ${grade}).`
+            });
+          }
         });
       });
       return bank;
@@ -704,8 +388,6 @@
       const [activeTab, setActiveTab] = useState('quiz');
       const [questions, setQuestions] = useState(() => buildInitialQuestions());
       const [customExams, setCustomExams] = useState([]);
-      const [topicsMap, setTopicsMap] = useState(SUBJECT_GRADE_TOPICS);
-      const [selectedSubject, setSelectedSubject] = useState('Sinh học');
       const [selectedGrade, setSelectedGrade] = useState('12');
       const [isTeacherAuth, setIsTeacherAuth] = useState(false);
       const [teacherPin] = useState('123456');
@@ -728,7 +410,7 @@
           <header className="bg-emerald-700 text-white shadow sticky top-0 z-40 print:hidden">
             <div className="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h1 className="text-lg font-bold">BioMaster THPT <span className="text-xs bg-emerald-800 px-2 py-0.5 rounded-full font-mono">v4.1</span></h1>
+                <h1 className="text-lg font-bold">BioMaster THPT - Chuyên Môn Sinh Học <span className="text-xs bg-emerald-800 px-2 py-0.5 rounded-full font-mono">v4.3</span></h1>
                 <p className="text-[11px] text-emerald-200">Biên soạn: <b>Thầy Trương Trung Can</b></p>
               </div>
               <nav className="flex flex-wrap gap-1.5 text-xs font-bold">
@@ -742,13 +424,19 @@
                   onClick={() => setActiveTab('teacher')}
                   className={`px-3 py-1.5 rounded-lg transition ${activeTab === 'teacher' ? 'bg-white text-emerald-800 shadow' : 'hover:bg-emerald-600 text-white'}`}
                 >
-                  Góc Giáo Viên
+                  Góc Giáo Viên (Sửa &amp; Tạo Đề)
                 </button>
                 <button
                   onClick={() => setActiveTab('exporter')}
                   className={`px-3 py-1.5 rounded-lg transition ${activeTab === 'exporter' ? 'bg-white text-emerald-800 shadow' : 'hover:bg-emerald-600 text-white'}`}
                 >
                   Xuất Đề Word / PDF
+                </button>
+                <button
+                  onClick={() => setActiveTab('bioTools')}
+                  className={`px-3 py-1.5 rounded-lg transition ${activeTab === 'bioTools' ? 'bg-white text-emerald-800 shadow' : 'hover:bg-emerald-600 text-white'}`}
+                >
+                  🧬 Tiện Ích Sinh Học 12
                 </button>
               </nav>
             </div>
@@ -759,9 +447,6 @@
               <QuizView
                 questions={questions}
                 customExams={customExams}
-                topicsMap={topicsMap}
-                selectedSubject={selectedSubject}
-                setSelectedSubject={setSelectedSubject}
                 selectedGrade={selectedGrade}
                 setSelectedGrade={setSelectedGrade}
                 onSaveSubmission={(sub) => setSubmissions(prev => [sub, ...prev])}
@@ -773,8 +458,6 @@
                 setQuestions={setQuestions}
                 customExams={customExams}
                 setCustomExams={setCustomExams}
-                topicsMap={topicsMap}
-                setTopicsMap={setTopicsMap}
                 isAuth={isTeacherAuth}
                 setIsAuth={setIsTeacherAuth}
                 teacherPin={teacherPin}
@@ -787,23 +470,21 @@
               <ExporterView
                 questions={questions}
                 customExams={customExams}
-                topicsMap={topicsMap}
-                selectedSubject={selectedSubject}
-                setSelectedSubject={setSelectedSubject}
                 selectedGrade={selectedGrade}
                 setSelectedGrade={setSelectedGrade}
               />
             )}
+            {activeTab === 'bioTools' && <BioToolsView />}
           </main>
 
           <footer className="bg-slate-800 text-slate-400 py-3 text-center text-xs print:hidden">
-            © 2026 BioMaster THPT - <b>Thầy Trương Trung Can</b>
+            © 2026 BioMaster THPT (Chuyên Sinh Học) - <b>Thầy Trương Trung Can</b>
           </footer>
         </div>
       );
     }
 
-    function QuizView({ questions, customExams, topicsMap, selectedSubject, setSelectedSubject, selectedGrade, setSelectedGrade, onSaveSubmission }) {
+    function QuizView({ questions, customExams, selectedGrade, setSelectedGrade, onSaveSubmission }) {
       const [selectedTopic, setSelectedTopic] = useState('Tất cả');
       const [selectedCustomExamId, setSelectedCustomExamId] = useState('');
       const [studentName, setStudentName] = useState('');
@@ -814,38 +495,26 @@
       const [submitted, setSubmitted] = useState(false);
       const [activeList, setActiveList] = useState([]);
 
-      const topics = useMemo(() => ['Tất cả', ...(topicsMap[selectedSubject]?.[selectedGrade] || [])], [topicsMap, selectedSubject, selectedGrade]);
-      const matchingCustomExams = useMemo(
-        () => (customExams || []).filter(ex => ex.subject === selectedSubject && ex.grade === selectedGrade),
-        [customExams, selectedSubject, selectedGrade]
-      );
+      const topics = useMemo(() => ['Tất cả', ...(BIOLOGY_TOPICS[selectedGrade] || [])], [selectedGrade]);
+      const matchingCustomExams = useMemo(() => (customExams || []).filter(ex => ex.grade === selectedGrade), [customExams, selectedGrade]);
+
       const filtered = useMemo(() => {
         if (selectedCustomExamId) {
-          const foundExam = (customExams || []).find(ex => String(ex.id) === String(selectedCustomExamId));
-          return foundExam ? foundExam.questions : [];
+          const found = (customExams || []).find(ex => String(ex.id) === String(selectedCustomExamId));
+          return found ? found.questions : [];
         }
-        return questions.filter(q =>
-          q.subject === selectedSubject &&
-          q.grade === selectedGrade &&
-          (selectedSubject !== 'Tiếng Anh' || q.type === 'mcq') &&
-          (selectedTopic === 'Tất cả' || q.topic === selectedTopic)
-        );
-      }, [questions, customExams, selectedCustomExamId, selectedSubject, selectedGrade, selectedTopic]);
+        return questions.filter(q => q.subject === 'Sinh học' && q.grade === selectedGrade && (selectedTopic === 'Tất cả' || q.topic === selectedTopic));
+      }, [questions, customExams, selectedCustomExamId, selectedGrade, selectedTopic]);
 
       const score = useMemo(() => activeList.reduce((acc, q, i) => (q.type === 'mcq' && answers[i] === q.correct ? acc + 1 : acc), 0), [activeList, answers]);
 
       if (!started) {
         return (
           <div className="max-w-2xl mx-auto bg-white p-6 rounded-2xl border shadow-sm space-y-4">
-            <h2 className="text-xl font-bold text-center text-slate-800">Luyện Tập Trắc Nghiệm THPT</h2>
+            <h2 className="text-xl font-bold text-center text-slate-800">Luyện Trắc Nghiệm Môn Sinh Học THPT</h2>
             <div className="grid grid-cols-3 gap-2">
               {['10', '11', '12'].map(g => (
                 <button key={g} onClick={() => { setSelectedGrade(g); setSelectedTopic('Tất cả'); setSelectedCustomExamId(''); }} className={`p-2.5 rounded-xl text-xs font-bold ${selectedGrade === g ? 'bg-emerald-600 text-white' : 'bg-slate-100'}`}>Khối {g}</button>
-              ))}
-            </div>
-            <div className="grid grid-cols-3 gap-2">
-              {['Sinh học', 'Công nghệ Nông nghiệp', 'Tiếng Anh'].map(s => (
-                <button key={s} onClick={() => { setSelectedSubject(s); setSelectedTopic('Tất cả'); setSelectedCustomExamId(''); }} className={`p-2.5 rounded-xl text-xs font-bold ${selectedSubject === s ? 'bg-emerald-600 text-white' : 'bg-slate-100'}`}>{s}</button>
               ))}
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -855,17 +524,15 @@
 
             {matchingCustomExams.length > 0 && (
               <div className="p-3 bg-indigo-50/70 border border-indigo-200 rounded-xl space-y-1.5">
-                <label className="block text-[11px] font-bold text-indigo-800 uppercase">📁 Làm Đề Riêng Của Giáo Viên (Tách biệt ngân hàng):</label>
+                <label className="block text-[11px] font-bold text-indigo-800 uppercase">📁 Chọn Đề Riêng Của Thầy Can:</label>
                 <select
                   value={selectedCustomExamId}
                   onChange={e => setSelectedCustomExamId(e.target.value)}
                   className="w-full p-2 border border-indigo-300 rounded-lg text-xs bg-white font-semibold text-indigo-900"
                 >
-                  <option value="">-- Không chọn (Luyện theo chuyên đề ngân hàng có sẵn) --</option>
+                  <option value="">-- Luyện theo chuyên đề ngân hàng --</option>
                   {matchingCustomExams.map(ex => (
-                    <option key={ex.id} value={ex.id}>
-                      [Mã {ex.examCode}] {ex.title} ({ex.questions.length} câu)
-                    </option>
+                    <option key={ex.id} value={ex.id}>[Mã {ex.examCode}] {ex.title} ({ex.questions.length} câu)</option>
                   ))}
                 </select>
               </div>
@@ -876,6 +543,7 @@
                 {topics.map(t => <option key={t} value={t}>{t}</option>)}
               </select>
             )}
+
             <button
               onClick={() => {
                 if (!studentName.trim() || filtered.length === 0) return;
@@ -895,12 +563,11 @@
       }
 
       const cur = activeList[currentIdx];
-      const qLabel = selectedSubject === 'Tiếng Anh' ? `Question ${currentIdx + 1}` : `Câu ${currentIdx + 1}`;
       return (
         <div className="max-w-3xl mx-auto space-y-4">
           <div className="bg-white p-3.5 rounded-xl border flex justify-between items-center text-xs font-bold">
             <button onClick={() => setStarted(false)} className="text-slate-500">← Thoát</button>
-            <span>{studentName} | {qLabel}/{activeList.length}</span>
+            <span>{studentName} | Câu {currentIdx + 1}/{activeList.length}</span>
             {!submitted && (
               <button
                 onClick={() => {
@@ -909,10 +576,8 @@
                     id: Date.now(),
                     name: studentName.trim(),
                     className: studentClass.trim() || `Khối ${selectedGrade}`,
-                    subject: selectedSubject,
-                    topic: selectedCustomExamId
-                      ? (matchingCustomExams.find(ex => String(ex.id) === String(selectedCustomExamId))?.title || 'Đề riêng giáo viên')
-                      : selectedTopic,
+                    subject: 'Sinh học',
+                    topic: selectedCustomExamId ? 'Đề riêng giáo viên' : selectedTopic,
                     score,
                     total: activeList.length,
                     submittedAt: new Date().toLocaleString('vi-VN')
@@ -933,9 +598,7 @@
 
           {cur && (
             <div className="bg-white p-6 rounded-2xl border space-y-4">
-              <h3 className="font-bold text-sm leading-relaxed">{qLabel}: {cur.question}</h3>
-              {cur.richHtml && <div className="text-xs overflow-x-auto" dangerouslySetInnerHTML={{ __html: cur.richHtml }} />}
-              {cur.pageImage && <img src={cur.pageImage} alt="Minh họa" className="max-h-64 rounded-lg border mx-auto" />}
+              <h3 className="font-bold text-sm leading-relaxed">Câu {currentIdx + 1}: {cur.question}</h3>
               <div className="space-y-2">
                 {(cur.options || []).map((opt, oi) => {
                   const picked = answers[currentIdx] === oi;
@@ -948,7 +611,7 @@
                     cls = 'border-emerald-600 bg-emerald-50 font-semibold';
                   }
                   return (
-                    <button key={oi} onClick={() => !submitted && setAnswers(p => ({ ...p, [currentIdx]: oi }))} className={`w-full p-3 border rounded-xl text-left text-xs ${cls}`}>
+                    <button key={oi} onClick={() => !submitted && setAnswers(p => ({ ...p, [currentIdx]: oi }))} className={`w-full p-3 border rounded-xl text-left text-xs ${cls} block`}>
                       <b>{String.fromCharCode(65 + oi)}.</b> {opt}
                     </button>
                   );
@@ -970,23 +633,22 @@
     function TeacherView({ questions, setQuestions, customExams, setCustomExams, isAuth, setIsAuth, teacherPin, submissions, setSubmissions, showToast }) {
       const [pinInput, setPinInput] = useState('');
       const [subTab, setSubTab] = useState('upload');
-      const [subj, setSubj] = useState('Tiếng Anh');
       const [grade, setGrade] = useState('12');
-      const [topicName, setTopicName] = useState('Đề Upload Mới');
+      const [topicName, setTopicName] = useState('Đề Sinh Học Mới');
       const [customExamCode, setCustomExamCode] = useState('202');
       const [uploadStatus, setUploadStatus] = useState('');
       const [parsedList, setParsedList] = useState([]);
       const [previewMode, setPreviewMode] = useState(false);
       const [viewingExamId, setViewingExamId] = useState(null);
 
-      const [editSubj, setEditSubj] = useState('Tiếng Anh');
-      const [editGrade, setEditGrade] = useState('12');
-      const [drafts, setDrafts] = useState({});
+      // Sửa câu hỏi chi tiết
+      const [editingExamId, setEditingExamId] = useState(null);
+      const [editingQuestions, setEditingQuestions] = useState([]);
 
       if (!isAuth) {
         return (
           <div className="max-w-sm mx-auto bg-white p-6 rounded-2xl border shadow-sm text-center space-y-4">
-            <h2 className="font-bold text-base">Xác Thực Giáo Viên</h2>
+            <h2 className="font-bold text-base">Xác Thực Giáo Viên Sinh Học</h2>
             <input type="password" placeholder="Nhập PIN (mặc định: 123456)" value={pinInput} onChange={e => setPinInput(e.target.value)} className="w-full p-2.5 border rounded-xl text-center font-mono text-sm" />
             <button onClick={() => pinInput === teacherPin && setIsAuth(true)} className="w-full py-2.5 bg-emerald-600 text-white rounded-xl text-xs font-bold">Mở Khóa</button>
           </div>
@@ -996,7 +658,7 @@
       const handleUploadFile = async (e, mode) => {
         const file = e.target.files?.[0];
         if (!file) return;
-        setUploadStatus(`Đang đọc & nhận diện đáp án từ tệp "${file.name}"...`);
+        setUploadStatus(`Đang đọc tệp "${file.name}"...`);
         let extracted = { text: '', richBlocks: {}, pageImages: {}, answerHints: {} };
         if (file.name.toLowerCase().endsWith('.pdf')) {
           extracted = await extractTextFromPdfFile(file, setUploadStatus);
@@ -1005,7 +667,7 @@
         } else {
           extracted.text = cleanVietnameseUnicode(await file.text());
         }
-        const generated = parseAndGenerateSimilarFromText(extracted.text, subj, grade, topicName.trim() || file.name, {
+        const generated = parseAndGenerateSimilarFromText(extracted.text, grade, topicName.trim() || file.name, {
           richBlocks: extracted.richBlocks,
           pageImages: extracted.pageImages,
           answerHints: extracted.answerHints,
@@ -1013,20 +675,17 @@
         });
         setParsedList(generated);
         setPreviewMode(true);
-        setUploadStatus(generated.length > 0 ? `Đã xử lý thành công ${generated.length} câu hỏi!` : 'Không tìm thấy cấu trúc câu hỏi chuẩn trong file.');
+        setUploadStatus(generated.length > 0 ? `Đã xử lý thành công ${generated.length} câu hỏi!` : 'Không tìm thấy cấu trúc câu hỏi.');
         e.target.value = '';
       };
-
-      const editableQuestions = questions.filter(q => q.subject === editSubj && q.grade === editGrade);
 
       return (
         <div className="space-y-4">
           <div className="flex flex-wrap gap-2">
             {[
-              { id: 'upload', label: '1. Upload PDF / Word & Tạo Đề' },
-              { id: 'customExams', label: `2. Kho Đề Riêng Đã Lưu (${customExams.length})` },
-              { id: 'batchEdit', label: '3. Sửa Ngân Hàng Có Sẵn' },
-              { id: 'results', label: `4. Kết Quả Học Sinh (${submissions.length})` }
+              { id: 'upload', label: '1. Upload PDF / Word' },
+              { id: 'customExams', label: `2. Kho Đề Đã Lưu & Chỉnh Sửa (${customExams.length})` },
+              { id: 'results', label: `3. Kết Quả Học Sinh (${submissions.length})` }
             ].map(t => (
               <button
                 key={t.id}
@@ -1040,46 +699,33 @@
 
           {subTab === 'upload' && (
             <div className="bg-white p-5 rounded-2xl border space-y-4">
-              <h3 className="font-bold text-sm text-slate-800">Tạo Đề Hoàn Chỉnh Hoặc Đề Tương Tự Từ File PDF / Word (.docx)</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-                <select value={subj} onChange={e => setSubj(e.target.value)} className="p-2.5 border rounded-xl bg-white font-bold">
-                  <option value="Tiếng Anh">Tiếng Anh (100% MCQ)</option>
-                  <option value="Sinh học">Sinh học</option>
-                  <option value="Công nghệ Nông nghiệp">Công nghệ Nông nghiệp</option>
-                </select>
+              <h3 className="font-bold text-sm text-slate-800">Tạo Đề Thi Môn Sinh Học Từ File PDF / Word (.docx)</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                 <select value={grade} onChange={e => setGrade(e.target.value)} className="p-2.5 border rounded-xl bg-white font-bold">
-                  <option value="12">Khối 12</option>
-                  <option value="11">Khối 11</option>
-                  <option value="10">Khối 10</option>
+                  <option value="12">Sinh học Khối 12</option>
+                  <option value="11">Sinh học Khối 11</option>
+                  <option value="10">Sinh học Khối 10</option>
                 </select>
                 <input
                   type="text"
                   value={topicName}
                   onChange={e => setTopicName(e.target.value)}
-                  placeholder="Tên đề thi (VD: Đề thi thử lần 1)..."
+                  placeholder="Tên đề thi..."
                   className="p-2.5 border rounded-xl"
                 />
               </div>
               <div className="flex items-center gap-2 text-xs">
-                <span className="font-bold text-slate-600">Mã đề xuất / lưu:</span>
-                <input
-                  type="text"
-                  value={customExamCode}
-                  onChange={e => setCustomExamCode(e.target.value)}
-                  className="w-24 p-2 border rounded-lg font-mono font-bold text-center"
-                />
+                <span className="font-bold text-slate-600">Mã đề:</span>
+                <input type="text" value={customExamCode} onChange={e => setCustomExamCode(e.target.value)} className="w-24 p-2 border rounded-lg font-mono font-bold text-center" />
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <label className="p-4 border-2 border-dashed border-blue-300 bg-blue-50/50 rounded-xl text-center cursor-pointer hover:bg-blue-50 transition">
-                  <span className="block font-bold text-xs text-blue-800">📄 Chế độ 1: Ra Đề Hoàn Chỉnh Từ File Upload</span>
-                  <span className="block text-[11px] text-slate-500 mt-1">Giữ nguyên câu hỏi, bảng biểu, ảnh &amp; đáp án tô đỏ / gạch dưới / bảng đáp án</span>
+                  <span className="block font-bold text-xs text-blue-800">📄 Chế độ 1: Giữ Nguyên Đề Gốc</span>
                   <input type="file" accept=".pdf,.docx,.txt" onChange={e => handleUploadFile(e, 'exact')} className="hidden" />
                 </label>
-
                 <label className="p-4 border-2 border-dashed border-emerald-300 bg-emerald-50/50 rounded-xl text-center cursor-pointer hover:bg-emerald-50 transition">
-                  <span className="block font-bold text-xs text-emerald-800">✨ Chế độ 2: Tạo Đề Tương Tự Mới Từ Đề Gốc</span>
-                  <span className="block text-[11px] text-slate-500 mt-1">Biến đổi số liệu, đảo phương án &amp; cập nhật đáp án mới</span>
+                  <span className="block font-bold text-xs text-emerald-800">✨ Chế độ 2: Sinh Đề Tương Tự Mới</span>
                   <input type="file" accept=".pdf,.docx,.txt" onChange={e => handleUploadFile(e, 'similar')} className="hidden" />
                 </label>
               </div>
@@ -1089,50 +735,49 @@
               {parsedList.length > 0 && (
                 <div className="space-y-3 border-t pt-4">
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <button onClick={() => setPreviewMode(p => !p)} className="px-3 py-1.5 bg-slate-800 text-white rounded-lg text-xs font-bold">
-                      {previewMode ? 'Ẩn Xem Trước' : `👁️ Xem Trước Toàn Bộ (${parsedList.length} câu)`}
+                    <button onClick={() => setPreviewMode(p => !p)} className="px-3.5 py-2 bg-slate-900 text-white rounded-xl text-xs font-bold shadow hover:bg-slate-800 transition">
+                      {previewMode ? '▲ Ẩn Xem Trước Đề' : `👁️ Xem Trước Trực Tiếp (${parsedList.length} câu)`}
                     </button>
                     <div className="flex flex-wrap gap-2">
                       <button
-                        onClick={() => downloadExamAsWordDoc(topicName || `ĐỀ THI ${subj.toUpperCase()}`, customExamCode || '202', 'Thầy Trương Trung Can', '50', subj, grade, parsedList)}
-                        className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-bold"
+                        onClick={() => downloadExamAsWordDoc(topicName, customExamCode, 'Thầy Trương Trung Can', '50', grade, parsedList)}
+                        className="px-3.5 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold shadow hover:bg-blue-700 transition"
                       >
-                        📥 Xuất File Word (.DOC)
+                        📥 Xuất Word (.DOC)
                       </button>
                       <button
                         onClick={() => {
                           const newExamObj = {
                             id: Date.now(),
-                            title: topicName.trim() || `Đề ${subj} Khối ${grade}`,
+                            title: topicName.trim() || `Đề Sinh Học Khối ${grade}`,
                             examCode: customExamCode.trim() || '202',
-                            subject: subj,
                             grade,
                             createdAt: new Date().toLocaleString('vi-VN'),
                             questions: parsedList
                           };
                           setCustomExams(prev => [newExamObj, ...prev]);
-                          showToast(`Đã lưu thành bộ đề riêng "${newExamObj.title}" (Không lẫn vào ngân hàng có sẵn)!`);
+                          showToast(`Đã lưu thành bộ đề riêng! Kiểm tra ở tab Kho Đề Đã Lưu.`);
                         }}
-                        className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-bold"
+                        className="px-3.5 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold shadow hover:bg-emerald-700 transition"
                       >
-                        💾 Lưu Thành Đề Riêng (Không Lẫn Ngân Hàng)
+                        💾 Lưu Vào Kho Đề Riêng
                       </button>
                     </div>
                   </div>
 
                   {previewMode && (
-                    <div className="max-h-96 overflow-y-auto space-y-2 border rounded-xl p-3 bg-slate-50 text-xs">
-                      {parsedList.map((q, idx) => (
-                        <div key={q.id} className="p-3 bg-white rounded-lg border space-y-1">
-                          <div className="font-bold">{subj === 'Tiếng Anh' ? `Question ${idx + 1}:` : `Câu ${idx + 1}:`} {q.question}</div>
-                          {q.richHtml && <div dangerouslySetInnerHTML={{ __html: q.richHtml }} />}
-                          {q.pageImage && <img src={q.pageImage} alt="Trang PDF" className="max-h-48 border rounded" />}
-                          {(q.options || []).map((o, oi) => (
-                            <div key={oi} className={q.correct === oi ? 'text-emerald-700 font-bold pl-3' : 'pl-3'}>
-                              {String.fromCharCode(65 + oi)}. {o} {q.correct === oi && '✓'}
-                            </div>
-                          ))}
-                          <div className="text-[11px] text-slate-500 italic">{q.explanation}</div>
+                    <div className="p-4 bg-slate-50 border rounded-xl space-y-4 max-h-[500px] overflow-y-auto">
+                      <h4 className="font-bold text-xs text-emerald-800 uppercase border-b pb-2">Nội dung xem trước đề thi ({parsedList.length} câu):</h4>
+                      {parsedList.map((q, qIndex) => (
+                        <div key={q.id || qIndex} className="p-3.5 bg-white border rounded-xl space-y-2 text-xs">
+                          <p className="font-bold text-slate-800">Câu {qIndex + 1}: {q.question}</p>
+                          <div className="space-y-1 pl-3">
+                            {(q.options || []).map((opt, oIdx) => (
+                              <div key={oIdx} className={q.correct === oIdx ? 'text-emerald-700 font-bold' : 'text-slate-700'}>
+                                <b>{String.fromCharCode(65 + oIdx)}.</b> {opt} {q.correct === oIdx && '✓ (Đúng)'}
+                              </div>
+                            ))}
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -1144,70 +789,117 @@
 
           {subTab === 'customExams' && (
             <div className="bg-white p-5 rounded-2xl border space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-3">
-                <div>
-                  <h3 className="font-bold text-sm text-slate-800">📁 Kho Đề Riêng Của Giáo Viên (Tách Biệt Hoàn Toàn Với Ngân Hàng Có Sẵn)</h3>
-                  <p className="text-[11px] text-slate-500">Các đề Thầy tải lên hoặc tạo tương tự được lưu nguyên bộ tại đây để xuất Word/PDF hoặc giao học sinh làm riêng.</p>
-                </div>
-              </div>
-
+              <h3 className="font-bold text-sm text-slate-800">📁 Kho Đề Sinh Học Riêng Của Giáo Viên (Có Thể Xem Trước &amp; Sửa Trực Tiếp)</h3>
               {customExams.length === 0 ? (
-                <div className="text-center py-10 text-xs text-slate-400 space-y-2">
-                  <p>Chưa có bộ đề riêng nào được lưu.</p>
-                  <p>Thầy hãy tạo đề ở tab <b>"1. Upload PDF / Word &amp; Tạo Đề"</b> rồi bấm <b>"💾 Lưu Thành Đề Riêng"</b> nhé!</p>
-                </div>
+                <p className="text-xs text-slate-400 text-center py-8">Chưa có bộ đề nào được lưu.</p>
               ) : (
                 <div className="space-y-3">
                   {customExams.map((ex, eIdx) => {
-                    const isViewing = viewingExamId === ex.id;
+                    const isEditing = editingExamId === ex.id;
+                    const isPreviewing = viewingExamId === ex.id;
                     return (
-                      <div key={ex.id} className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
+                      <div key={ex.id} className="p-4 bg-slate-50 border rounded-xl space-y-3">
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <div>
-                            <div className="flex items-center gap-2">
-                              <span className="px-2 py-0.5 bg-indigo-100 text-indigo-800 rounded font-mono text-[11px] font-bold">Mã đề: {ex.examCode}</span>
-                              <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded text-[11px] font-bold">{ex.subject} - Khối {ex.grade}</span>
-                              <span className="text-[11px] text-slate-400">{ex.createdAt}</span>
-                            </div>
-                            <h4 className="font-bold text-sm text-slate-800 mt-1">{eIdx + 1}. {ex.title} ({ex.questions.length} câu hỏi)</h4>
+                            <span className="px-2 py-0.5 bg-indigo-100 text-indigo-800 rounded font-mono text-[11px] font-bold">Mã đề: {ex.examCode}</span>
+                            <h4 className="font-bold text-sm text-slate-800 mt-1">{eIdx + 1}. {ex.title} ({ex.questions.length} câu)</h4>
                           </div>
-
                           <div className="flex flex-wrap gap-2">
                             <button
-                              onClick={() => setViewingExamId(isViewing ? null : ex.id)}
+                              onClick={() => setViewingExamId(isPreviewing ? null : ex.id)}
                               className="px-3 py-1.5 bg-slate-800 text-white rounded-lg text-xs font-bold"
                             >
-                              {isViewing ? 'Thu Gọn' : '👁️ Xem Chi Tiết'}
+                              {isPreviewing ? '👁️ Đóng Xem Trước' : '👁️ Xem Trước Đề'}
                             </button>
                             <button
-                              onClick={() => downloadExamAsWordDoc(ex.title, ex.examCode, 'Thầy Trương Trung Can', '50', ex.subject, ex.grade, ex.questions)}
+                              onClick={() => {
+                                if (isEditing) {
+                                  setCustomExams(prev => prev.map(item => item.id === ex.id ? { ...item, questions: editingQuestions } : item));
+                                  setEditingExamId(null);
+                                  showToast('Đã lưu chỉnh sửa câu hỏi!');
+                                } else {
+                                  setEditingExamId(ex.id);
+                                  setEditingQuestions(JSON.parse(JSON.stringify(ex.questions)));
+                                }
+                              }}
+                              className="px-3 py-1.5 bg-amber-600 text-white rounded-lg text-xs font-bold"
+                            >
+                              {isEditing ? '💾 Lưu Chỉnh Sửa' : '✏️ Sửa Đề Này'}
+                            </button>
+                            <button
+                              onClick={() => downloadExamAsWordDoc(ex.title, ex.examCode, 'Thầy Trương Trung Can', '50', ex.grade, isEditing ? editingQuestions : ex.questions)}
                               className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-bold"
                             >
-                              📥 Xuất Word (.DOC)
+                              📥 Xuất Word
                             </button>
                             <button
                               onClick={() => setCustomExams(prev => prev.filter(item => item.id !== ex.id))}
-                              className="px-3 py-1.5 bg-rose-50 text-rose-600 border border-rose-200 rounded-lg text-xs font-bold"
+                              className="px-3 py-1.5 bg-rose-50 text-rose-600 border rounded-lg text-xs font-bold"
                             >
-                              Xóa Đề
+                              Xóa
                             </button>
                           </div>
                         </div>
 
-                        {isViewing && (
-                          <div className="max-h-80 overflow-y-auto space-y-2 border-t pt-3 text-xs">
+                        {isPreviewing && !isEditing && (
+                          <div className="space-y-3 border-t pt-3 max-h-96 overflow-y-auto bg-white p-3 rounded-xl border">
                             {ex.questions.map((q, qi) => (
-                              <div key={q.id || qi} className="p-2.5 bg-white rounded-lg border space-y-1">
-                                <div className="font-bold">{ex.subject === 'Tiếng Anh' ? `Question ${qi + 1}:` : `Câu ${qi + 1}:`} {q.question}</div>
+                              <div key={qi} className="p-3 bg-slate-50 border rounded-lg space-y-1.5 text-xs">
+                                <p className="font-bold text-slate-800">Câu {qi + 1}: {q.question}</p>
+                                <div className="space-y-1 pl-3">
+                                  {(q.options || []).map((opt, oi) => (
+                                    <div key={oi} className={q.correct === oi ? 'text-emerald-700 font-bold' : 'text-slate-700'}>
+                                      <b>{String.fromCharCode(65 + oi)}.</b> {opt} {q.correct === oi && '✓ (Đúng)'}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {isEditing ? (
+                          <div className="space-y-3 border-t pt-3 max-h-96 overflow-y-auto">
+                            {editingQuestions.map((q, qi) => (
+                              <div key={qi} className="p-3 bg-white border rounded-lg space-y-2 text-xs">
+                                <label className="font-bold text-emerald-800">Câu {qi + 1}:</label>
+                                <textarea
+                                  rows={2}
+                                  value={q.question}
+                                  onChange={e => {
+                                    const nextQ = [...editingQuestions];
+                                    nextQ[qi].question = e.target.value;
+                                    setEditingQuestions(nextQ);
+                                  }}
+                                  className="w-full p-2 border rounded"
+                                />
                                 {(q.options || []).map((opt, oi) => (
-                                  <div key={oi} className={q.correct === oi ? 'text-emerald-700 font-bold pl-3' : 'pl-3'}>
-                                    {String.fromCharCode(65 + oi)}. {opt} {q.correct === oi && '✓'}
+                                  <div key={oi} className="flex items-center gap-2">
+                                    <input
+                                      type="radio"
+                                      checked={q.correct === oi}
+                                      onChange={() => {
+                                        const nextQ = [...editingQuestions];
+                                        nextQ[qi].correct = oi;
+                                        setEditingQuestions(nextQ);
+                                      }}
+                                    />
+                                    <input
+                                      type="text"
+                                      value={opt}
+                                      onChange={e => {
+                                        const nextQ = [...editingQuestions];
+                                        nextQ[qi].options[oi] = e.target.value;
+                                        setEditingQuestions(nextQ);
+                                      }}
+                                      className="flex-1 p-1 border rounded"
+                                    />
                                   </div>
                                 ))}
                               </div>
                             ))}
                           </div>
-                        )}
+                        ) : null}
                       </div>
                     );
                   })}
@@ -1216,87 +908,11 @@
             </div>
           )}
 
-          {subTab === 'batchEdit' && (
-            <div className="bg-white p-5 rounded-2xl border space-y-4">
-              <div className="flex flex-wrap gap-2 items-center justify-between">
-                <div className="flex gap-2">
-                  <select value={editSubj} onChange={e => setEditSubj(e.target.value)} className="p-2 border rounded-lg text-xs font-bold">
-                    <option value="Tiếng Anh">Tiếng Anh</option>
-                    <option value="Sinh học">Sinh học</option>
-                    <option value="Công nghệ Nông nghiệp">Công nghệ Nông nghiệp</option>
-                  </select>
-                  <select value={editGrade} onChange={e => setEditGrade(e.target.value)} className="p-2 border rounded-lg text-xs font-bold">
-                    <option value="12">Khối 12</option>
-                    <option value="11">Khối 11</option>
-                    <option value="10">Khối 10</option>
-                  </select>
-                </div>
-                <button
-                  onClick={() => {
-                    setQuestions(prev => prev.map(q => drafts[q.id] ? drafts[q.id] : q));
-                    setDrafts({});
-                    showToast('Đã lưu tất cả chỉnh sửa ngân hàng!');
-                  }}
-                  className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-xs font-bold"
-                >
-                  💾 Lưu Tất Cả Thay Đổi
-                </button>
-              </div>
-              <div className="space-y-3 max-h-[500px] overflow-y-auto">
-                {editableQuestions.map((q, idx) => {
-                  const curItem = drafts[q.id] || q;
-                  return (
-                    <div key={q.id} className="p-3 bg-slate-50 border rounded-xl space-y-2 text-xs">
-                      <div className="font-bold text-slate-700">{editSubj === 'Tiếng Anh' ? `Question ${idx + 1}` : `Câu ${idx + 1}`}</div>
-                      <textarea
-                        rows={2}
-                        value={curItem.question}
-                        onChange={e => setDrafts(p => ({ ...p, [q.id]: { ...curItem, question: e.target.value } }))}
-                        className="w-full p-2 bg-white border rounded-lg"
-                      />
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        {(curItem.options || []).map((opt, oi) => (
-                          <div key={oi} className="flex items-center gap-1.5">
-                            <input
-                              type="radio"
-                              checked={curItem.correct === oi}
-                              onChange={() => setDrafts(p => ({ ...p, [q.id]: { ...curItem, correct: oi } }))}
-                            />
-                            <input
-                              type="text"
-                              value={opt}
-                              onChange={e => {
-                                const nextOpts = [...(curItem.options || [])];
-                                nextOpts[oi] = e.target.value;
-                                setDrafts(p => ({ ...p, [q.id]: { ...curItem, options: nextOpts } }));
-                              }}
-                              className="flex-1 p-1.5 bg-white border rounded"
-                            />
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
           {subTab === 'results' && (
             <div className="bg-white p-5 rounded-2xl border space-y-3">
-              <div className="flex justify-between items-center">
-                <h3 className="font-bold text-sm">Kết Quả Làm Bài Của Học Sinh ({submissions.length})</h3>
-                {submissions.length > 0 && (
-                  <button
-                    onClick={() => setSubmissions([])}
-                    className="px-3 py-1.5 bg-rose-50 text-rose-600 border border-rose-200 rounded-lg text-xs font-bold"
-                  >
-                    Xóa Lịch Sử
-                  </button>
-                )}
-              </div>
+              <h3 className="font-bold text-sm">Kết Quả Học Sinh Làm Bài ({submissions.length})</h3>
               {submissions.length === 0 ? (
-                <p className="text-xs text-slate-400 text-center py-8">Chưa có dữ liệu bài nộp.</p>
+                <p className="text-xs text-slate-400 text-center py-8">Chưa có bài nộp.</p>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-left border-collapse text-xs">
@@ -1304,7 +920,7 @@
                       <tr className="bg-slate-100 border-b">
                         <th className="p-2.5">Họ Tên</th>
                         <th className="p-2.5">Lớp</th>
-                        <th className="p-2.5">Môn / Đề</th>
+                        <th className="p-2.5">Chủ Đề</th>
                         <th className="p-2.5">Điểm</th>
                         <th className="p-2.5">Thời Gian</th>
                       </tr>
@@ -1314,7 +930,7 @@
                         <tr key={s.id}>
                           <td className="p-2.5 font-bold">{s.name}</td>
                           <td className="p-2.5">{s.className}</td>
-                          <td className="p-2.5">{s.subject} - {s.topic}</td>
+                          <td className="p-2.5">{s.topic}</td>
                           <td className="p-2.5 font-bold text-emerald-700">{s.score}/{s.total}</td>
                           <td className="p-2.5 text-slate-400">{s.submittedAt}</td>
                         </tr>
@@ -1329,40 +945,22 @@
       );
     }
 
-    function ExporterView({ questions, customExams, topicsMap, selectedSubject, setSelectedSubject, selectedGrade, setSelectedGrade }) {
-      const [selectedTopic, setSelectedTopic] = useState('Tất cả');
+    function ExporterView({ questions, customExams, selectedGrade, setSelectedGrade }) {
       const [selectedCustomExamId, setSelectedCustomExamId] = useState('');
       const [examCode, setExamCode] = useState('101');
-      const topics = useMemo(() => ['Tất cả', ...(topicsMap[selectedSubject]?.[selectedGrade] || [])], [topicsMap, selectedSubject, selectedGrade]);
-      const matchingCustomExams = useMemo(
-        () => (customExams || []).filter(ex => ex.subject === selectedSubject && ex.grade === selectedGrade),
-        [customExams, selectedSubject, selectedGrade]
-      );
-      const activeCustomExam = useMemo(
-        () => matchingCustomExams.find(ex => String(ex.id) === String(selectedCustomExamId)) || null,
-        [matchingCustomExams, selectedCustomExamId]
-      );
+
+      const matchingCustomExams = useMemo(() => (customExams || []).filter(ex => ex.grade === selectedGrade), [customExams, selectedGrade]);
+      const activeCustomExam = useMemo(() => matchingCustomExams.find(ex => String(ex.id) === String(selectedCustomExamId)) || null, [matchingCustomExams, selectedCustomExamId]);
+
       const exportList = useMemo(() => {
         if (activeCustomExam) return activeCustomExam.questions;
-        return questions.filter(q =>
-          q.subject === selectedSubject &&
-          q.grade === selectedGrade &&
-          (selectedSubject !== 'Tiếng Anh' || q.type === 'mcq') &&
-          (selectedTopic === 'Tất cả' || q.topic === selectedTopic)
-        );
-      }, [questions, activeCustomExam, selectedSubject, selectedGrade, selectedTopic]);
-
-      const labelWord = selectedSubject === 'Tiếng Anh' ? 'Question' : 'Câu';
+        return questions.filter(q => q.subject === 'Sinh học' && q.grade === selectedGrade);
+      }, [questions, activeCustomExam, selectedGrade]);
 
       return (
         <div className="space-y-4">
           <div className="bg-white p-4 rounded-xl border flex flex-wrap gap-2 items-center print:hidden">
-            <select value={selectedSubject} onChange={e => { setSelectedSubject(e.target.value); setSelectedTopic('Tất cả'); setSelectedCustomExamId(''); }} className="p-2 border rounded-lg text-xs bg-white font-bold">
-              <option value="Sinh học">Sinh học</option>
-              <option value="Công nghệ Nông nghiệp">Công nghệ Nông nghiệp</option>
-              <option value="Tiếng Anh">Tiếng Anh</option>
-            </select>
-            <select value={selectedGrade} onChange={e => { setSelectedGrade(e.target.value); setSelectedTopic('Tất cả'); setSelectedCustomExamId(''); }} className="p-2 border rounded-lg text-xs bg-white font-bold">
+            <select value={selectedGrade} onChange={e => { setSelectedGrade(e.target.value); setSelectedCustomExamId(''); }} className="p-2 border rounded-lg text-xs bg-white font-bold">
               <option value="12">Khối 12</option>
               <option value="11">Khối 11</option>
               <option value="10">Khối 10</option>
@@ -1377,21 +975,16 @@
                 }}
                 className="p-2 border border-indigo-300 rounded-lg text-xs bg-indigo-50 font-bold text-indigo-900"
               >
-                <option value="">Nguồn: Ngân hàng có sẵn</option>
+                <option value="">Nguồn: Ngân hàng mặc định</option>
                 {matchingCustomExams.map(ex => (
                   <option key={ex.id} value={ex.id}>📁 Đề riêng: {ex.title} (Mã {ex.examCode})</option>
                 ))}
               </select>
             )}
-            {!selectedCustomExamId && (
-              <select value={selectedTopic} onChange={e => setSelectedTopic(e.target.value)} className="p-2 border rounded-lg text-xs bg-white">
-                {topics.map(t => <option key={t} value={t}>{t}</option>)}
-              </select>
-            )}
             <input type="text" value={examCode} onChange={e => setExamCode(e.target.value)} className="w-20 p-2 border rounded-lg text-xs font-mono" placeholder="Mã đề" />
             <div className="ml-auto flex gap-2">
               <button
-                onClick={() => downloadExamAsWordDoc(activeCustomExam ? activeCustomExam.title : `ĐỀ KIỂM TRA MÔN ${selectedSubject.toUpperCase()}`, examCode, 'Thầy Trương Trung Can', '50', selectedSubject, selectedGrade, exportList)}
+                onClick={() => downloadExamAsWordDoc(activeCustomExam ? activeCustomExam.title : `ĐỀ THI MÔN SINH HỌC KHỐI ${selectedGrade}`, examCode, 'Thầy Trương Trung Can', '50', selectedGrade, exportList)}
                 className="px-3 py-2 bg-blue-600 text-white rounded-lg text-xs font-bold"
               >
                 📥 Tải File Word (.DOC)
@@ -1404,22 +997,96 @@
 
           <div className="bg-white p-8 rounded-xl border font-serif text-sm space-y-5 print:border-none print:p-0">
             <div className="text-center border-b-2 border-slate-900 pb-3">
-              <h2 className="font-bold text-base uppercase">{activeCustomExam ? activeCustomExam.title : `ĐỀ KIỂM TRA ÔN TẬP MÔN ${selectedSubject.toUpperCase()} - KHỐI ${selectedGrade}`}</h2>
+              <h2 className="font-bold text-base uppercase">{activeCustomExam ? activeCustomExam.title : `ĐỀ KIỂM TRA MÔN SINH HỌC - KHỐI ${selectedGrade}`}</h2>
               <p className="text-xs italic">Giáo viên: Thầy Trương Trung Can | Mã đề: {examCode}</p>
             </div>
             {exportList.map((q, idx) => (
-              <div key={q.id} className="space-y-1">
-                <p className="font-bold">{labelWord} {idx + 1}: <span className="font-normal">{q.question}</span></p>
-                {q.richHtml && <div dangerouslySetInnerHTML={{ __html: q.richHtml }} />}
-                {q.pageImage && <img src={q.pageImage} alt="Hình" className="max-h-56 my-1" />}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 pl-5">
+              <div key={idx} className="space-y-1.5">
+                <p className="font-bold">Câu {idx + 1}: <span className="font-normal">{q.question}</span></p>
+                <div className="space-y-1 pl-4">
                   {(q.options || []).map((o, oi) => (
-                    <div key={oi}><b>{String.fromCharCode(65 + oi)}.</b> {o}</div>
+                    <div key={oi} className="block"><b>{String.fromCharCode(65 + oi)}.</b> {o}</div>
                   ))}
                 </div>
               </div>
             ))}
           </div>
+        </div>
+      );
+    }
+
+    function BioToolsView() {
+      const [activeToolTab, setActiveToolTab] = useState('terms');
+
+      const termsList = [
+        { term: 'Gen', desc: 'Một đoạn DNA mang thông tin mã hóa cho một chuỗi polypeptide hoặc RNA.' },
+        { term: 'Mã di truyền', desc: 'Bộ ba nucleotide trên mRNA quy định axit amin tương ứng (có 64 bộ ba).' },
+        { term: 'Phiên mã', desc: 'Quá trình tổng hợp RNA dựa trên mạch khuôn DNA dưới sự xúc tác của RNA polymerase.' },
+        { term: 'Dịch mã', desc: 'Quá trình tổng hợp chuỗi polypeptide tại ribosome dựa trên khuôn mẫu mRNA.' },
+        { term: 'Đột biến gen', desc: 'Những biến đổi nhỏ trong cấu trúc của gene liên quan đến một hoặc một số cặp nucleotide.' },
+        { term: 'Operon Lac', desc: 'Cụm gồm các gene điều hòa, vận hành, khởi động và các gene cấu trúc (Z, Y, A) ở vi khuẩn E. coli.' },
+        { term: 'Thể dị bội', desc: 'Cơ thể mà tế bào sinh dưỡng có số lượng NST thay đổi ở một hay một số cặp NST (2n+1, 2n-1).' },
+        { term: 'Quần thể giao phấn ngẫu nhiên', desc: 'Quần thể trong đó các cá thể tự do giao phối với nhau không phụ thuộc vào kiểu gen.' }
+      ];
+
+      const formulasList = [
+        { name: '1. Số lượng Nu & Chiều dài DNA', formula: 'L = (N / 2) × 3.4 Å\nN = (L / 3.4) × 2\nM = N × 300 đvc' },
+        { name: '2. Nguyên tắc bổ sung (NTBS DNA)', formula: 'A = T, G = X\n%A = %T, %G = %X\n%A + %G = 50%' },
+        { name: '3. Số liên kết Hydro (H)', formula: 'H = 2A + 3G' },
+        { name: '4. Số liên kết Hóa trị Phosphodiester', formula: 'HT = N - 2 (trên 2 mạch)' },
+        { name: '5. Số phân tử mRNA & Axit Amin', formula: 'Số phân tử mRNA = k × số lần phiên mã\nSố amino acid tham gia dịch mã = (N/6) - 1' }
+      ];
+
+      const mendelCrosses = [
+        { title: '1. P: AA x aa (Trội hoàn toàn)', f1: '100% Aa (100% Trội)', f2: '3 Trội : 1 Lặn (1 AA : 2 Aa : 1 aa)' },
+        { title: '2. P: Aa x Aa (Phân ly)', f1: '1 AA : 2 Aa : 1 aa', f2: '3 Trội : 1 Lặn' },
+        { title: '3. P: Aa x aa (Lai phân tích)', f1: '1 Aa : 1 aa', f2: '1 Trội : 1 Lặn' },
+        { title: '4. P: AA x AA hoặc aa x aa', f1: '100% đồng tính', f2: '100% đồng tính' },
+        { title: '5. P: Aa x AA', f1: '100% Trội (1 AA : 1 Aa)', f2: '100% Trội' },
+        { title: '6. P: Trội không hoàn toàn (Aa x Aa)', f1: '1 Trội : 2 Trung gian : 1 Lặn', f2: '1:2:1 (Kiểu hình trùng kiểu gen)' }
+      ];
+
+      return (
+        <div className="space-y-4">
+          <div className="flex border-b gap-3 pb-2 text-xs font-bold">
+            <button onClick={() => setActiveToolTab('terms')} className={`px-4 py-2 rounded-lg ${activeToolTab === 'terms' ? 'bg-emerald-600 text-white' : 'bg-white border'}`}>📖 Thuật Ngữ Sinh Học 12</button>
+            <button onClick={() => setActiveToolTab('formulas')} className={`px-4 py-2 rounded-lg ${activeToolTab === 'formulas' ? 'bg-emerald-600 text-white' : 'bg-white border'}`}>📐 Công Thức Sinh Học Phân Tử</button>
+            <button onClick={() => setActiveToolTab('crosses')} className={`px-4 py-2 rounded-lg ${activeToolTab === 'crosses' ? 'bg-emerald-600 text-white' : 'bg-white border'}`}>🧬 6 Phép Lai Cơ Bản Mendel</button>
+          </div>
+
+          {activeToolTab === 'terms' && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {termsList.map((t, idx) => (
+                <div key={idx} className="p-4 bg-white border rounded-xl space-y-1">
+                  <h4 className="font-bold text-emerald-800 text-sm">{idx + 1}. {t.term}</h4>
+                  <p className="text-xs text-slate-600 leading-relaxed">{t.desc}</p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {activeToolTab === 'formulas' && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {formulasList.map((f, idx) => (
+                <div key={idx} className="p-4 bg-white border rounded-xl space-y-2">
+                  <h4 className="font-bold text-slate-800 text-sm">{f.name}</h4>
+                  <pre className="p-2.5 bg-slate-50 border rounded-lg text-xs font-mono text-emerald-900 whitespace-pre-wrap">{f.formula}</pre>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {activeToolTab === 'crosses' && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {mendelCrosses.map((c, idx) => (
+                <div key={idx} className="p-4 bg-white border rounded-xl space-y-1.5 text-xs">
+                  <h4 className="font-bold text-emerald-900 text-sm">{c.title}</h4>
+                  <p><b>F1:</b> {c.f1}</p>
+                  <p><b>Tỷ lệ F2:</b> {c.f2}</p>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       );
     }
