@@ -224,6 +224,66 @@
       return ansMap;
     }
 
+    // TÍCH HỢP GEMINI AI API ĐỂ TẠO ĐỀ & TẠO ĐỀ TƯƠNG TỰ CHÍNH XÁC DỰA TRÊN NGUỒN AI VÀ GROUNDING
+    async function generateAiSimilarExamFromGemini(rawText, grade, topic, mode = 'similar') {
+      const systemPrompt = `Bạn là trợ lý AI chuyên gia biên soạn đề thi Sinh học THPT chuẩn chương trình GDPT 2018 (Kết nối tri thức). Nhiệm vụ của bạn là phân tích đề gốc được cung cấp, sau đó tạo ra một bộ đề thi trắc nghiệm hoàn chỉnh tương tự hoặc mới hoàn toàn dựa trên nguồn kiến thức chuẩn xác từ Gemini AI.`;
+      const userPrompt = `Đề gốc/Nội dung nguồn:\n${rawText.slice(0, 5000)}\n\nYêu cầu: Hãy trích xuất hoặc biên soạn ${mode === 'similar' ? 'các câu hỏi tương tự với số liệu/biến thể mới dựa trên nguồn Gemini AI Grounding' : 'đúng các câu hỏi từ đề gốc'}, bao gồm nội dung câu hỏi, 4 phương án A, B, C, D, đáp án đúng (0 cho A, 1 cho B, 2 cho C, 3 cho D) và giải thích chi tiết. Trả về ĐÚNG định dạng JSON Array chứa các object: [{"question": "...", "options": ["...", "...", "...", "..."], "correct": 0, "explanation": "..."}]`;
+
+      const payload = {
+        contents: [{ parts: [{ text: userPrompt }] }],
+        tools: [{ "google_search": {} }],
+        systemInstruction: { parts: [{ text: systemPrompt }] },
+        generationConfig: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: "ARRAY",
+            items: {
+              type: "OBJECT",
+              properties: {
+                question: { type: "STRING" },
+                options: { type: "ARRAY", items: { type: "STRING" } },
+                correct: { type: "INTEGER" },
+                explanation: { type: "STRING" }
+              },
+              propertyOrdering: ["question", "options", "correct", "explanation"]
+            }
+          }
+        }
+      };
+
+      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=`;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          const res = await fetch(apiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          const result = await res.json();
+          const candidate = result.candidates?.[0];
+          if (candidate && candidate.content?.parts?.[0]?.text) {
+            const parsed = JSON.parse(candidate.content.parts[0].text);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              return parsed.map((item, idx) => ({
+                id: `AI_${mode === 'exact' ? 'EXACT' : 'SIM'}_${Date.now()}_${idx + 1}`,
+                subject: 'Sinh học',
+                grade,
+                topic,
+                type: 'mcq',
+                question: item.question,
+                options: item.options || ['A', 'B', 'C', 'D'],
+                correct: typeof item.correct === 'number' ? item.correct : 0,
+                explanation: `[Gemini AI Grounding] ${item.explanation || 'Đáp án chuẩn xác theo chương trình Sinh học THPT.'}`
+              }));
+            }
+          }
+        } catch (err) {
+          await new Promise(r => setTimeout(r, Math.pow(2, attempt) * 1000));
+        }
+      }
+      return null;
+    }
+
     function parseAndGenerateSimilarFromText(rawText, grade, topic, options = {}) {
       const { richBlocks = {}, pageImages = {}, answerHints = {}, mode = 'similar' } = options;
       const normalized = cleanVietnameseUnicode(rawText);
@@ -410,7 +470,7 @@
           <header className="bg-emerald-700 text-white shadow sticky top-0 z-40 print:hidden">
             <div className="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h1 className="text-lg font-bold">BioMaster THPT - Chuyên Môn Sinh Học <span className="text-xs bg-emerald-800 px-2 py-0.5 rounded-full font-mono">v4.3</span></h1>
+                <h1 className="text-lg font-bold">BioMaster THPT - Chuyên Môn Sinh Học <span className="text-xs bg-emerald-800 px-2 py-0.5 rounded-full font-mono">v4.5</span></h1>
                 <p className="text-[11px] text-emerald-200">Biên soạn: <b>Thầy Trương Trung Can</b></p>
               </div>
               <nav className="flex flex-wrap gap-1.5 text-xs font-bold">
@@ -640,8 +700,8 @@
       const [parsedList, setParsedList] = useState([]);
       const [previewMode, setPreviewMode] = useState(false);
       const [viewingExamId, setViewingExamId] = useState(null);
+      const [isAiProcessing, setIsAiProcessing] = useState(false);
 
-      // Sửa câu hỏi chi tiết
       const [editingExamId, setEditingExamId] = useState(null);
       const [editingQuestions, setEditingQuestions] = useState([]);
 
@@ -658,7 +718,7 @@
       const handleUploadFile = async (e, mode) => {
         const file = e.target.files?.[0];
         if (!file) return;
-        setUploadStatus(`Đang đọc tệp "${file.name}"...`);
+        setUploadStatus(`Đang đọc tệp "${file.name}" và quét đáp án tô màu / gạch dưới...`);
         let extracted = { text: '', richBlocks: {}, pageImages: {}, answerHints: {} };
         if (file.name.toLowerCase().endsWith('.pdf')) {
           extracted = await extractTextFromPdfFile(file, setUploadStatus);
@@ -667,12 +727,33 @@
         } else {
           extracted.text = cleanVietnameseUnicode(await file.text());
         }
-        const generated = parseAndGenerateSimilarFromText(extracted.text, grade, topicName.trim() || file.name, {
-          richBlocks: extracted.richBlocks,
-          pageImages: extracted.pageImages,
-          answerHints: extracted.answerHints,
-          mode
-        });
+
+        let generated = [];
+        if (mode === 'ai_similar' || mode === 'ai_exact') {
+          setIsAiProcessing(true);
+          setUploadStatus(`Đang kết nối Gemini AI Grounding để xử lý đề thi (${mode === 'ai_similar' ? 'Tạo đề tương tự AI' : 'Trích xuất chính xác AI'})...`);
+          const aiRes = await generateAiSimilarExamFromGemini(extracted.text, grade, topicName.trim() || file.name, mode === 'ai_similar' ? 'similar' : 'exact');
+          setIsAiProcessing(false);
+          if (aiRes && aiRes.length > 0) {
+            generated = aiRes;
+          } else {
+            setUploadStatus('AI bận hoặc không phản hồi, hệ thống chuyển sang trích xuất tự động cục bộ...');
+            generated = parseAndGenerateSimilarFromText(extracted.text, grade, topicName.trim() || file.name, {
+              richBlocks: extracted.richBlocks,
+              pageImages: extracted.pageImages,
+              answerHints: extracted.answerHints,
+              mode: mode === 'ai_similar' ? 'similar' : 'exact'
+            });
+          }
+        } else {
+          generated = parseAndGenerateSimilarFromText(extracted.text, grade, topicName.trim() || file.name, {
+            richBlocks: extracted.richBlocks,
+            pageImages: extracted.pageImages,
+            answerHints: extracted.answerHints,
+            mode
+          });
+        }
+
         setParsedList(generated);
         setPreviewMode(true);
         setUploadStatus(generated.length > 0 ? `Đã xử lý thành công ${generated.length} câu hỏi!` : 'Không tìm thấy cấu trúc câu hỏi.');
@@ -721,14 +802,24 @@
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <label className="p-4 border-2 border-dashed border-blue-300 bg-blue-50/50 rounded-xl text-center cursor-pointer hover:bg-blue-50 transition">
-                  <span className="block font-bold text-xs text-blue-800">📄 Chế độ 1: Giữ Nguyên Đề Gốc</span>
+                  <span className="block font-bold text-xs text-blue-800">📄 Chế độ 1: Giữ Nguyên Đề Gốc (Quét Đáp Án Tô Màu / Gạch Dưới)</span>
                   <input type="file" accept=".pdf,.docx,.txt" onChange={e => handleUploadFile(e, 'exact')} className="hidden" />
                 </label>
                 <label className="p-4 border-2 border-dashed border-emerald-300 bg-emerald-50/50 rounded-xl text-center cursor-pointer hover:bg-emerald-50 transition">
-                  <span className="block font-bold text-xs text-emerald-800">✨ Chế độ 2: Sinh Đề Tương Tự Mới</span>
+                  <span className="block font-bold text-xs text-emerald-800">✨ Chế độ 2: Sinh Đề Tương Tự Mới (Cục bộ)</span>
                   <input type="file" accept=".pdf,.docx,.txt" onChange={e => handleUploadFile(e, 'similar')} className="hidden" />
                 </label>
+                <label className="p-4 border-2 border-dashed border-indigo-300 bg-indigo-50/50 rounded-xl text-center cursor-pointer hover:bg-indigo-50 transition sm:col-span-2">
+                  <span className="block font-bold text-xs text-indigo-900">🤖 Chế độ 3: <b>Gemini AI Grounding</b> - Tạo Đề &amp; Đề Tương Tự Thông Minh Cực Chính Xác</span>
+                  <input type="file" accept=".pdf,.docx,.txt" onChange={e => handleUploadFile(e, 'ai_similar')} className="hidden" />
+                </label>
               </div>
+
+              {isAiProcessing && (
+                <div className="p-3 bg-indigo-50 text-indigo-800 rounded-xl text-xs font-bold text-center animate-pulse">
+                  🤖 Gemini AI đang phân tích nội dung, tìm kiếm thông tin và biên soạn đề thi chuẩn xác...
+                </div>
+              )}
 
               {uploadStatus && <p className="text-xs font-semibold text-indigo-700 bg-indigo-50 p-2.5 rounded-lg">{uploadStatus}</p>}
 
@@ -1017,17 +1108,41 @@
 
     function BioToolsView() {
       const [activeToolTab, setActiveToolTab] = useState('terms');
+      const [selectedTopicTerm, setSelectedTopicTerm] = useState('Tất cả chủ đề');
 
-      const termsList = [
-        { term: 'Gen', desc: 'Một đoạn DNA mang thông tin mã hóa cho một chuỗi polypeptide hoặc RNA.' },
-        { term: 'Mã di truyền', desc: 'Bộ ba nucleotide trên mRNA quy định axit amin tương ứng (có 64 bộ ba).' },
-        { term: 'Phiên mã', desc: 'Quá trình tổng hợp RNA dựa trên mạch khuôn DNA dưới sự xúc tác của RNA polymerase.' },
-        { term: 'Dịch mã', desc: 'Quá trình tổng hợp chuỗi polypeptide tại ribosome dựa trên khuôn mẫu mRNA.' },
-        { term: 'Đột biến gen', desc: 'Những biến đổi nhỏ trong cấu trúc của gene liên quan đến một hoặc một số cặp nucleotide.' },
-        { term: 'Operon Lac', desc: 'Cụm gồm các gene điều hòa, vận hành, khởi động và các gene cấu trúc (Z, Y, A) ở vi khuẩn E. coli.' },
-        { term: 'Thể dị bội', desc: 'Cơ thể mà tế bào sinh dưỡng có số lượng NST thay đổi ở một hay một số cặp NST (2n+1, 2n-1).' },
-        { term: 'Quần thể giao phấn ngẫu nhiên', desc: 'Quần thể trong đó các cá thể tự do giao phối với nhau không phụ thuộc vào kiểu gen.' }
+      const allTermsList = [
+        // Di truyền phân tử & Cơ chế biến dị (Lớp 12)
+        { topic: 'Di truyền phân tử & Cơ chế biến dị', term: 'Gen', desc: 'Một đoạn DNA mang thông tin mã hóa cho một chuỗi polypeptide hoặc RNA.' },
+        { topic: 'Di truyền phân tử & Cơ chế biến dị', term: 'Mã di truyền', desc: 'Bộ ba nucleotide trên mRNA quy định axit amin tương ứng (có 64 bộ ba).' },
+        { topic: 'Di truyền phân tử & Cơ chế biến dị', term: 'Phiên mã', desc: 'Quá trình tổng hợp RNA dựa trên mạch khuôn DNA dưới sự xúc tác của RNA polymerase.' },
+        { topic: 'Di truyền phân tử & Cơ chế biến dị', term: 'Dịch mã', desc: 'Quá trình tổng hợp chuỗi polypeptide tại ribosome dựa trên khuôn mẫu mRNA.' },
+        { topic: 'Di truyền phân tử & Cơ chế biến dị', term: 'Đột biến gen', desc: 'Những biến đổi nhỏ trong cấu trúc của gene liên quan đến một hoặc một số cặp nucleotide.' },
+        { topic: 'Di truyền phân tử & Cơ chế biến dị', term: 'Operon Lac', desc: 'Cụm gồm các gene điều hòa, vận hành, khởi động và các gene cấu trúc (Z, Y, A) ở vi khuẩn E. coli.' },
+
+        // Di truyền Nhiễm sắc thể & Quy luật Mendel (Lớp 12)
+        { topic: 'Di truyền Nhiễm sắc thể & Quy luật Mendel', term: 'Allele (Alen)', desc: 'Các trạng thái biểu hiện khác nhau của cùng một gen, nằm ở cùng một locus trên NST.' },
+        { topic: 'Di truyền Nhiễm sắc thể & Quy luật Mendel', term: 'Thể dị bội', desc: 'Cơ thể mà tế bào sinh dưỡng có số lượng NST thay đổi ở một hay một số cặp NST (2n+1, 2n-1).' },
+        { topic: 'Di truyền Nhiễm sắc thể & Quy luật Mendel', term: 'Hoán vị gen', desc: 'Hiện tượng các allele đổi chỗ cho nhau do sự trao đổi chéo giữa các chromatid khác nguồn ở kỳ đầu giảm phân I.' },
+
+        // Di truyền quần thể & Công nghệ Gen (Lớp 12)
+        { topic: 'Di truyền quần thể & Công nghệ Gen', term: 'Quần thể giao phấn ngẫu nhiên', desc: 'Quần thể trong đó các cá thể tự do giao phối với nhau không phụ thuộc vào kiểu gen.' },
+        { topic: 'Di truyền quần thể & Công nghệ Gen', term: 'Công nghệ gen', desc: 'Quy trình công nghệ dùng để tạo ra những tế bào hoặc sinh vật có gen bị biến đổi hoặc có gen mới.' },
+
+        // Tiến hóa & Học thuyết hiện đại (Lớp 12)
+        { topic: 'Tiến hóa & Học thuyết hiện đại', term: 'Quần thể thích nghi', desc: 'Quần thể mang các đặc điểm hình thái, sinh lý giúp sinh vật tồn tại và sinh sản trong môi trường sống.' },
+        { topic: 'Tiến hóa & Học thuyết hiện đại', term: 'Chọn lọc tự nhiên', desc: 'Quá trình phân hóa khả năng sống sót và sinh sản của các cá thể với các kiểu gen khác nhau trong quần thể.' },
+
+        // Sinh thái học & Bảo tồn môi trường (Lớp 12)
+        { topic: 'Sinh thái học & Bảo tồn môi trường', term: 'Quần xã sinh vật', desc: 'Tập hợp các quần thể sinh vật thuộc nhiều loài khác nhau, sống trong một không gian và thời gian nhất định.' },
+        { topic: 'Sinh thái học & Bảo tồn môi trường', term: 'Hệ sinh thái', desc: 'Bao gồm quần xã sinh vật và sinh cảnh (môi trường vô cơ của quần xã), tương tác qua lại với nhau.' }
       ];
+
+      const topicTermCategories = ['Tất cả chủ đề', ...BIOLOGY_TOPICS['12']];
+
+      const filteredTerms = useMemo(() => {
+        if (selectedTopicTerm === 'Tất cả chủ đề') return allTermsList;
+        return allTermsList.filter(t => t.topic === selectedTopicTerm);
+      }, [selectedTopicTerm]);
 
       const formulasList = [
         { name: '1. Số lượng Nu & Chiều dài DNA', formula: 'L = (N / 2) × 3.4 Å\nN = (L / 3.4) × 2\nM = N × 300 đvc' },
@@ -1038,30 +1153,46 @@
       ];
 
       const mendelCrosses = [
-        { title: '1. P: AA x aa (Trội hoàn toàn)', f1: '100% Aa (100% Trội)', f2: '3 Trội : 1 Lặn (1 AA : 2 Aa : 1 aa)' },
-        { title: '2. P: Aa x Aa (Phân ly)', f1: '1 AA : 2 Aa : 1 aa', f2: '3 Trội : 1 Lặn' },
-        { title: '3. P: Aa x aa (Lai phân tích)', f1: '1 Aa : 1 aa', f2: '1 Trội : 1 Lặn' },
-        { title: '4. P: AA x AA hoặc aa x aa', f1: '100% đồng tính', f2: '100% đồng tính' },
-        { title: '5. P: Aa x AA', f1: '100% Trội (1 AA : 1 Aa)', f2: '100% Trội' },
-        { title: '6. P: Trội không hoàn toàn (Aa x Aa)', f1: '1 Trội : 2 Trung gian : 1 Lặn', f2: '1:2:1 (Kiểu hình trùng kiểu gen)' }
+        { title: '1. Phép lai: AA x AA', p: 'AA × AA', kg: '1 AA (1)', kh: '1 Trội (1)', type: 'Đồng tính trội' },
+        { title: '2. Phép lai: AA x Aa', p: 'AA × Aa', kg: 'AA : Aa (1:1)', kh: '1 Trội (1)', type: 'Đồng tính trội' },
+        { title: '3. Phép lai: AA x aa', p: 'AA × aa', kg: '1 Aa (1)', kh: '1 Trội (1)', type: 'Đồng tính trội' },
+        { title: '4. Phép lai: Aa x Aa', p: 'Aa × Aa', kg: '1/4 AA : 2/4 Aa : 1/4 aa (1:2:1)', kh: '3/4 Trội : 1/4 Lặn (3:1)', type: 'Phân tính 3:1' },
+        { title: '5. Phép lai: Aa x aa', p: 'Aa × aa', kg: '1/2 Aa : 1/2 aa (1:1)', kh: '1/2 Trội : 1/2 Lặn (1:1)', type: 'Phân tính 1:1' },
+        { title: '6. Phép lai: aa x aa', p: 'aa × aa', kg: '1 aa (1)', kh: '1 Lặn (1)', type: 'Đồng tính lặn' }
       ];
 
       return (
         <div className="space-y-4">
-          <div className="flex border-b gap-3 pb-2 text-xs font-bold">
-            <button onClick={() => setActiveToolTab('terms')} className={`px-4 py-2 rounded-lg ${activeToolTab === 'terms' ? 'bg-emerald-600 text-white' : 'bg-white border'}`}>📖 Thuật Ngữ Sinh Học 12</button>
+          <div className="flex flex-wrap border-b gap-3 pb-2 text-xs font-bold">
+            <button onClick={() => setActiveToolTab('terms')} className={`px-4 py-2 rounded-lg ${activeToolTab === 'terms' ? 'bg-emerald-600 text-white' : 'bg-white border'}`}>📖 Thuật Ngữ Sinh Học 12 (Tất Cả Chủ Đề)</button>
             <button onClick={() => setActiveToolTab('formulas')} className={`px-4 py-2 rounded-lg ${activeToolTab === 'formulas' ? 'bg-emerald-600 text-white' : 'bg-white border'}`}>📐 Công Thức Sinh Học Phân Tử</button>
-            <button onClick={() => setActiveToolTab('crosses')} className={`px-4 py-2 rounded-lg ${activeToolTab === 'crosses' ? 'bg-emerald-600 text-white' : 'bg-white border'}`}>🧬 6 Phép Lai Cơ Bản Mendel</button>
+            <button onClick={() => setActiveToolTab('crosses')} className={`px-4 py-2 rounded-lg ${activeToolTab === 'crosses' ? 'bg-emerald-600 text-white' : 'bg-white border'}`}>🧬 Bảng 6 Phép Lai Một Tính Trạng Menđen</button>
           </div>
 
           {activeToolTab === 'terms' && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {termsList.map((t, idx) => (
-                <div key={idx} className="p-4 bg-white border rounded-xl space-y-1">
-                  <h4 className="font-bold text-emerald-800 text-sm">{idx + 1}. {t.term}</h4>
-                  <p className="text-xs text-slate-600 leading-relaxed">{t.desc}</p>
-                </div>
-              ))}
+            <div className="space-y-3">
+              <div className="flex flex-wrap gap-2 items-center bg-white p-3 border rounded-xl">
+                <span className="text-xs font-bold text-slate-700">Lọc theo chuyên đề Sinh học 12:</span>
+                <select
+                  value={selectedTopicTerm}
+                  onChange={e => setSelectedTopicTerm(e.target.value)}
+                  className="p-2 border rounded-lg text-xs bg-white font-bold text-emerald-900"
+                >
+                  {topicTermCategories.map(cat => (
+                    <option key={cat} value={cat}>{cat}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {filteredTerms.map((t, idx) => (
+                  <div key={idx} className="p-4 bg-white border rounded-xl space-y-1.5 shadow-sm">
+                    <span className="text-[10px] uppercase font-bold px-2 py-0.5 bg-emerald-50 text-emerald-800 rounded">{t.topic}</span>
+                    <h4 className="font-bold text-emerald-900 text-sm mt-1">{idx + 1}. {t.term}</h4>
+                    <p className="text-xs text-slate-600 leading-relaxed">{t.desc}</p>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
@@ -1077,14 +1208,36 @@
           )}
 
           {activeToolTab === 'crosses' && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {mendelCrosses.map((c, idx) => (
-                <div key={idx} className="p-4 bg-white border rounded-xl space-y-1.5 text-xs">
-                  <h4 className="font-bold text-emerald-900 text-sm">{c.title}</h4>
-                  <p><b>F1:</b> {c.f1}</p>
-                  <p><b>Tỷ lệ F2:</b> {c.f2}</p>
-                </div>
-              ))}
+            <div className="bg-white p-5 rounded-2xl border space-y-4">
+              <div className="border-b pb-3">
+                <h3 className="font-bold text-sm text-slate-800">DI TRUYỀN HỌC MENĐEN - QUY LUẬT PHÂN LI</h3>
+                <p className="text-xs text-slate-500">Bảng 6 Phép Lai Một Tính Trạng (Quy ước: Gen A trội hoàn toàn so với a)</p>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-slate-100 border-b">
+                      <th className="p-3 border">STT</th>
+                      <th className="p-3 border">Phép lai (P)</th>
+                      <th className="p-3 border">Tỉ lệ kiểu gen (F1)</th>
+                      <th className="p-3 border">Tỉ lệ kiểu hình (F1)</th>
+                      <th className="p-3 border">Tính chất</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {mendelCrosses.map((c, idx) => (
+                      <tr key={idx} className="hover:bg-slate-50">
+                        <td className="p-3 border font-bold text-center">{idx + 1}</td>
+                        <td className="p-3 border font-mono font-bold text-emerald-800">{c.p}</td>
+                        <td className="p-3 border font-mono">{c.kg}</td>
+                        <td className="p-3 border">{c.kh}</td>
+                        <td className="p-3 border font-bold text-indigo-700">{c.type}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
         </div>
@@ -1100,3 +1253,5 @@
   </script>
 </body>
 </html>
+```
+eof
