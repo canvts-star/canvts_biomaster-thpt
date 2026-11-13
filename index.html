@@ -7,13 +7,17 @@
   <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- React & ReactDOM 18 -->
-  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
-  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script crossorigin="anonymous" src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script crossorigin="anonymous" src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
   <!-- Babel cho JSX -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+  <script crossorigin="anonymous" src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
   <!-- Thư viện đọc PDF.js & Mammoth.js (.docx) -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+  <script crossorigin="anonymous" src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script crossorigin="anonymous" src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+  <!-- Thư viện JSZip đọc trực tiếp lõi XML màu đỏ & gạch dưới trong file .docx -->
+  <script crossorigin="anonymous" src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <!-- Thư viện OCR Tesseract.js đọc chữ trong khung/ảnh của file PDF -->
+  <script crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
     body { font-family: 'Inter', sans-serif; }
@@ -29,41 +33,30 @@
   <script type="text/babel">
     const { useState, useEffect, useMemo, useCallback, Component } = React;
 
-    // Cấu hình PDF.js worker an toàn
-    if (window.pdfjsLib && window.pdfjsLib.GlobalWorkerOptions) {
-      window.pdfjsLib.GlobalWorkerOptions.workerSrc =
-        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-    }
-
-    // =========================================================================
-    // 1. ERROR BOUNDARY CHỐNG SẬP TRANG WEB
-    // =========================================================================
+    // ErrorBoundary bắt lỗi giao diện an toàn
     class ErrorBoundary extends Component {
       constructor(props) {
         super(props);
-        this.state = { hasError: false, errText: '' };
+        this.state = { hasError: false, errorMessage: '' };
       }
       static getDerivedStateFromError(error) {
-        return { hasError: true, errText: error?.message || 'Lỗi hiển thị' };
+        return { hasError: true, errorMessage: error?.message || 'Lỗi hiển thị giao diện.' };
+      }
+      componentDidCatch(error, info) {
+        console.error('ErrorBoundary caught:', error, info);
       }
       render() {
         if (this.state.hasError) {
           return (
-            <div className="min-h-screen flex items-center justify-center p-6 bg-slate-50">
-              <div className="max-w-md w-full bg-white p-6 rounded-2xl shadow-xl border border-rose-200 text-center space-y-4">
-                <div className="text-3xl">⚠️</div>
-                <h2 className="text-lg font-bold text-slate-800">Khôi Phục Phiên Làm Việc</h2>
-                <p className="text-xs text-slate-600">Đã phát hiện dữ liệu bộ nhớ đệm cũ ({this.state.errText}). Nhấn nút bên dưới để làm mới sạch sẽ.</p>
-                <button
-                  onClick={() => {
-                    try { localStorage.clear(); } catch (e) {}
-                    window.location.reload();
-                  }}
-                  className="w-full bg-emerald-600 text-white py-2.5 rounded-xl font-bold text-xs shadow hover:bg-emerald-700"
-                >
-                  Làm Mới Ứng Dụng Ngay
-                </button>
-              </div>
+            <div className="p-8 max-w-lg mx-auto my-10 bg-rose-50 border border-rose-300 rounded-2xl text-center space-y-3">
+              <h2 className="text-lg font-bold text-rose-800">Đã xảy ra sự cố hiển thị</h2>
+              <p className="text-xs text-rose-600 font-mono">{this.state.errorMessage}</p>
+              <button
+                onClick={() => this.setState({ hasError: false, errorMessage: '' })}
+                className="px-4 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold"
+              >
+                Khôi Phục Ứng Dụng
+              </button>
             </div>
           );
         }
@@ -71,319 +64,585 @@
       }
     }
 
+    // Cấu hình PDF.js worker an toàn
+    if (window.pdfjsLib && window.pdfjsLib.GlobalWorkerOptions) {
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    }
+
     // =========================================================================
-    // 2. TRÌNH ĐỌC FILE PDF & WORD (.DOCX) TRỰC TIẾP (KHÔNG CẦN API KEY)
+    // 1. CHUẨN HÓA UNICODE TIẾNG VIỆT & ĐỌC FILE PDF / WORD (.DOCX)
     // =========================================================================
-    async function extractTextFromPdfFile(file) {
+    function cleanVietnameseUnicode(str) {
+      if (!str) return '';
+      return String(str)
+        .normalize('NFC')
+        .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFD]/g, '')
+        .replace(/\u00A0/g, ' ')
+        .replace(/[ \t]+/g, ' ');
+    }
+
+    function isRedOrHighlightHex(hexStr) {
+      if (!hexStr) return false;
+      const clean = String(hexStr).replace(/[^0-9A-Fa-f]/g, '').toUpperCase();
+      if (clean.length !== 6) return false;
+      if (['000000', 'FFFFFF', 'AUTO', '111111', '222222', '333333', '444444'].includes(clean)) return false;
+      const r = parseInt(clean.slice(0, 2), 16);
+      const g = parseInt(clean.slice(2, 4), 16);
+      const b = parseInt(clean.slice(4, 6), 16);
+      // Nhận diện màu đỏ (r chiếm ưu thế) hoặc các màu tô nổi bật (xanh dương đậm, tím, cam...)
+      if (r >= 130 && r > g + 45 && r > b + 45) return true;
+      if (b >= 140 && b > r + 50 && b > g + 30) return true;
+      return false;
+    }
+
+    async function extractTextFromPdfFile(file, onProgress) {
       try {
         const arrayBuffer = await file.arrayBuffer();
-        if (!window.pdfjsLib) return '';
+        if (!window.pdfjsLib) return { text: '', pageImages: {} };
         const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
         let fullText = '';
+        const pageImages = {};
+
         for (let p = 1; p <= pdf.numPages; p++) {
           const page = await pdf.getPage(p);
           const content = await page.getTextContent();
-          const strings = content.items.map(item => item.str);
-          fullText += `\n--- Trang ${p} ---\n` + strings.join(' ');
+          const ops = await page.getOperatorList();
+
+          let hasGraphicsOrTable = false;
+          const redOrUnderlineYCoords = [];
+
+          // Quét OperatorList của PDF để tìm tọa độ Y có chữ màu đỏ hoặc đường gạch dưới
+          if (ops && Array.isArray(ops.fnArray) && window.pdfjsLib.OPS) {
+            const OPS = window.pdfjsLib.OPS;
+            const imgOps = [
+              OPS.paintImageXObject,
+              OPS.paintInlineImageXObject,
+              OPS.paintJpegXObject,
+              OPS.paintImageMaskXObject
+            ];
+            let curIsRed = false;
+            let curY = 0;
+
+            for (let k = 0; k < ops.fnArray.length; k++) {
+              const fn = ops.fnArray[k];
+              const args = ops.argsArray[k] || [];
+              if (imgOps.includes(fn)) hasGraphicsOrTable = true;
+
+              if (fn === OPS.setFillRGBColor || fn === OPS.setStrokeRGBColor) {
+                const [r, g, b] = args;
+                const r255 = r <= 1 ? Math.round(r * 255) : r;
+                const g255 = g <= 1 ? Math.round(g * 255) : g;
+                const b255 = b <= 1 ? Math.round(b * 255) : b;
+                curIsRed = (r255 >= 130 && r255 > g255 + 45 && r255 > b255 + 45);
+              } else if (fn === OPS.setFillCMYKColor || fn === OPS.setStrokeCMYKColor) {
+                const [c, m, y, bl] = args;
+                curIsRed = (m > 0.5 && y > 0.4 && c < 0.3 && bl < 0.4);
+              } else if (fn === OPS.setTextMatrix && args.length >= 6) {
+                curY = args[5];
+              } else if ((fn === OPS.showText || fn === OPS.showSpacedText) && curIsRed) {
+                redOrUnderlineYCoords.push(curY);
+              } else if (fn === OPS.constructPath && Array.isArray(args[1])) {
+                // Kiểm tra nét gạch ngang ngắn (gạch dưới đáp án)
+                const coords = args[1];
+                if (coords.length >= 4 && Math.abs(coords[1] - coords[3]) < 1.5 && Math.abs(coords[0] - coords[2]) >= 8 && Math.abs(coords[0] - coords[2]) <= 260) {
+                  redOrUnderlineYCoords.push(coords[1]);
+                }
+              }
+            }
+          }
+
+          const sortedItems = [...content.items].sort((a, b) => {
+            const yDiff = Math.abs(b.transform[5] - a.transform[5]);
+            if (yDiff > 5) return b.transform[5] - a.transform[5];
+            return a.transform[4] - b.transform[4];
+          });
+
+          const lines = [];
+          let currentLine = [];
+          let lastY = null;
+          sortedItems.forEach(item => {
+            const y = item.transform[5];
+            if (lastY !== null && Math.abs(y - lastY) > 6) {
+              lines.push(currentLine.join(' '));
+              currentLine = [];
+            }
+            const isMarkedY = redOrUnderlineYCoords.some(ry => Math.abs(ry - y) < 6);
+            const strVal = isMarkedY && /^[A-D][\.\:\)]/.test(item.str.trim())
+              ? `[[ANS_MARK]]${item.str}`
+              : item.str;
+            currentLine.push(strVal);
+            lastY = y;
+          });
+          if (currentLine.length > 0) lines.push(currentLine.join(' '));
+
+          let pageText = cleanVietnameseUnicode(lines.join('\n')).trim();
+
+          if (hasGraphicsOrTable || pageText.length < 200) {
+            if (onProgress) onProgress(`Đang trích xuất bảng số liệu & hình ảnh Trang ${p}/${pdf.numPages}...`);
+            const viewport = page.getViewport({ scale: 1.8 });
+            const canvas = document.createElement('canvas');
+            canvas.width = viewport.width;
+            canvas.height = viewport.height;
+            const ctx = canvas.getContext('2d');
+            await page.render({ canvasContext: ctx, viewport }).promise;
+
+            if (hasGraphicsOrTable) {
+              pageImages[p] = canvas.toDataURL('image/png');
+            }
+
+            if (pageText.length < 200 && window.Tesseract) {
+              const ocrRes = await window.Tesseract.recognize(canvas, 'vie+eng');
+              const ocrText = cleanVietnameseUnicode(ocrRes?.data?.text || '').trim();
+              if (ocrText.length > pageText.length) {
+                pageText = ocrText;
+              }
+            }
+          }
+
+          fullText += `\n[[PAGE_${p}]]\n` + pageText;
         }
-        return fullText.trim();
+        return { text: fullText.trim(), pageImages };
       } catch (err) {
         console.error('Lỗi đọc PDF:', err);
-        return '';
+        return { text: '', pageImages: {} };
       }
     }
 
     async function extractTextFromDocxFile(file) {
       try {
         const arrayBuffer = await file.arrayBuffer();
-        if (!window.mammoth) return '';
-        const result = await window.mammoth.extractRawText({ arrayBuffer });
-        return (result.value || '').trim();
+
+        // BƯỚC 1: ĐỌC TRỰC TIẾP LÕI XML CỦA FILE WORD (.DOCX) QUA JSZIP ĐỂ BẮT CHÍNH XÁC MÀU ĐỎ & GẠCH DƯỚI
+        let xmlExtractedText = '';
+        const xmlAnswerHints = {};
+        if (window.JSZip) {
+          try {
+            const zip = await window.JSZip.loadAsync(arrayBuffer);
+            const docXmlStr = await zip.file('word/document.xml')?.async('string');
+            const stylesXmlStr = await zip.file('word/styles.xml')?.async('string');
+
+            // Đọc các style có quy định màu đỏ hoặc gạch dưới trong word/styles.xml
+            const markedStyleIds = new Set();
+            if (stylesXmlStr) {
+              const sDoc = new DOMParser().parseFromString(stylesXmlStr, 'application/xml');
+              sDoc.querySelectorAll('style').forEach(st => {
+                const stId = st.getAttribute('w:styleId') || st.getAttribute('styleId');
+                const colorEl = st.querySelector('rPr > color');
+                const uEl = st.querySelector('rPr > u');
+                const colorVal = colorEl?.getAttribute('w:val') || colorEl?.getAttribute('val');
+                const uVal = uEl?.getAttribute('w:val') || uEl?.getAttribute('val');
+                if ((colorVal && isRedOrHighlightHex(colorVal)) || (uEl && uVal !== 'none')) {
+                  if (stId) markedStyleIds.add(stId);
+                }
+              });
+            }
+
+            if (docXmlStr) {
+              const xmlDoc = new DOMParser().parseFromString(docXmlStr, 'application/xml');
+              const paragraphs = Array.from(xmlDoc.getElementsByTagName('w:p'));
+              const pLines = [];
+
+              paragraphs.forEach(p => {
+                const runs = Array.from(p.getElementsByTagName('w:r'));
+                let lineStr = '';
+                runs.forEach(r => {
+                  const rPr = r.getElementsByTagName('w:rPr')[0];
+                  let isMarkedRun = false;
+                  if (rPr) {
+                    const colorEl = rPr.getElementsByTagName('w:color')[0];
+                    const uEl = rPr.getElementsByTagName('w:u')[0];
+                    const hlEl = rPr.getElementsByTagName('w:highlight')[0];
+                    const rStyleEl = rPr.getElementsByTagName('w:rStyle')[0];
+
+                    const cVal = colorEl?.getAttribute('w:val') || colorEl?.getAttribute('val');
+                    const uVal = uEl?.getAttribute('w:val') || uEl?.getAttribute('val');
+                    const hlVal = hlEl?.getAttribute('w:val') || hlEl?.getAttribute('val');
+                    const stVal = rStyleEl?.getAttribute('w:val') || rStyleEl?.getAttribute('val');
+
+                    if (cVal && isRedOrHighlightHex(cVal)) isMarkedRun = true;
+                    if (uEl && uVal !== 'none') isMarkedRun = true;
+                    if (hlEl && hlVal && hlVal !== 'none' && hlVal !== 'white') isMarkedRun = true;
+                    if (stVal && markedStyleIds.has(stVal)) isMarkedRun = true;
+                  }
+
+                  const tNodes = Array.from(r.getElementsByTagName('w:t'));
+                  const rText = tNodes.map(t => t.textContent || '').join('');
+                  if (rText) {
+                    lineStr += isMarkedRun ? `[[ANS_MARK]]${rText}` : rText;
+                  }
+                });
+                if (lineStr.trim()) pLines.push(lineStr);
+              });
+
+              xmlExtractedText = cleanVietnameseUnicode(pLines.join('\n'));
+            }
+          } catch (xmlErr) {
+            console.warn('Không đọc được XML trực tiếp, chuyển sang Mammoth:', xmlErr);
+          }
+        }
+
+        // BƯỚC 2: DÙNG MAMMOTH LẤY BẢNG BIỂU, HÌNH ẢNH & BẢNG ĐÁP ÁN CUỐI ĐỀ
+        if (!window.mammoth) {
+          return { text: xmlExtractedText, richBlocks: {}, answerHints: xmlAnswerHints };
+        }
+
+        const htmlResult = await window.mammoth.convertToHtml({
+          arrayBuffer,
+          styleMap: [
+            "u => u",
+            "b => strong",
+            "i => em"
+          ]
+        });
+
+        if (htmlResult && htmlResult.value) {
+          const wrapper = document.createElement('div');
+          wrapper.innerHTML = cleanVietnameseUnicode(htmlResult.value);
+
+          const richBlocks = {};
+          const answerHints = { ...xmlAnswerHints };
+          let blockIdx = 0;
+
+          // Xử lý bảng biểu: tách Bảng đáp án riêng và giữ nguyên Bảng số liệu câu hỏi
+          wrapper.querySelectorAll('table').forEach(tbl => {
+            const rows = Array.from(tbl.querySelectorAll('tr')).map(tr =>
+              Array.from(tr.querySelectorAll('td, th')).map(cell => cell.textContent.replace(/\[\[ANS_MARK\]\]/g, '').trim())
+            );
+
+            let isAnswerTable = false;
+            const tableAnswerMap = {};
+
+            for (let r = 0; r < rows.length - 1; r++) {
+              const nums = rows[r].map(c => parseInt(c.replace(/\D/g, ''), 10));
+              const letters = rows[r + 1].map(c => c.replace(/[^A-Da-d]/g, '').toUpperCase());
+              const validPairs = nums.filter((n, idx) => !isNaN(n) && n >= 1 && n <= 60 && ['A', 'B', 'C', 'D'].includes(letters[idx]));
+              if (validPairs.length >= 3) {
+                isAnswerTable = true;
+                nums.forEach((n, idx) => {
+                  if (!isNaN(n) && n >= 1 && n <= 60 && ['A', 'B', 'C', 'D'].includes(letters[idx])) {
+                    tableAnswerMap[n] = letters[idx];
+                  }
+                });
+              }
+            }
+
+            rows.forEach(row => {
+              row.forEach(cell => {
+                const m = cell.match(/^(?:Câu|Question)?\s*(\d{1,2})\s*[\.:\-\)]\s*([A-D])$/i);
+                if (m) {
+                  tableAnswerMap[parseInt(m[1], 10)] = m[2].toUpperCase();
+                  isAnswerTable = true;
+                }
+              });
+              for (let c = 0; c < row.length - 1; c += 2) {
+                const qM = row[c].match(/^(?:Câu|Question)?\s*(\d{1,2})\s*[\.:\)]?$/i);
+                const aM = row[c + 1].match(/^([A-D])$/i);
+                if (qM && aM) {
+                  tableAnswerMap[parseInt(qM[1], 10)] = aM[1].toUpperCase();
+                  isAnswerTable = true;
+                }
+              }
+            });
+
+            if (isAnswerTable) {
+              Object.assign(answerHints, tableAnswerMap);
+              tbl.remove();
+            } else {
+              blockIdx++;
+              const token = `[[RICH_BLOCK_${blockIdx}]]`;
+              tbl.style.borderCollapse = 'collapse';
+              tbl.style.width = '100%';
+              tbl.style.margin = '8px 0';
+              tbl.querySelectorAll('td, th').forEach(cell => {
+                cell.style.border = '1px solid #94a3b8';
+                cell.style.padding = '4px 8px';
+              });
+              richBlocks[token] = tbl.outerHTML;
+              tbl.replaceWith(document.createTextNode(`\n${token}\n`));
+            }
+          });
+
+          // Giữ nguyên hình ảnh nhúng trong file Word
+          wrapper.querySelectorAll('img').forEach(img => {
+            blockIdx++;
+            const token = `[[RICH_BLOCK_${blockIdx}]]`;
+            img.style.maxWidth = '100%';
+            img.style.height = 'auto';
+            img.style.margin = '8px 0';
+            richBlocks[token] = img.outerHTML;
+            img.replaceWith(document.createTextNode(`\n${token}\n`));
+          });
+
+          wrapper.querySelectorAll('p, div, li, h1, h2, h3, h4, br').forEach(el => {
+            el.insertAdjacentText('afterend', '\n');
+          });
+
+          const mammothText = cleanVietnameseUnicode(wrapper.textContent || '');
+          // Ưu tiên dùng văn bản trích xuất từ XML (đã gắn [[ANS_MARK]] chính xác tại mọi chữ màu đỏ / gạch dưới)
+          const finalDocxText = xmlExtractedText.includes('[[ANS_MARK]]') ? xmlExtractedText : mammothText;
+          return { text: finalDocxText, richBlocks, answerHints };
+        }
+
+        return { text: xmlExtractedText, richBlocks: {}, answerHints: xmlAnswerHints };
       } catch (err) {
         console.error('Lỗi đọc DOCX:', err);
-        return '';
+        return { text: '', richBlocks: {}, answerHints: {} };
       }
     }
 
-    // Phân tích đề từ văn bản trích xuất (PDF / DOCX / TXT) và tạo đề tương tự tự động (Không cần API Key)
-    function parseAndGenerateSimilarFromText(rawText, subject, grade, topic, generateSimilarMode = true) {
-      const isEnglish = subject === 'Tiếng Anh';
-      // Chuẩn hóa khoảng trắng và xuống dòng từ PDF.js / Mammoth
-      const normalized = rawText
-        .replace(/\r\n/g, '\n')
-        .replace(/---\s*Trang\s*\d+\s*---/gi, '\n')
-        .replace(/\s+(Question\s+\d+[\.:]|Câu\s+\d+[\.:])/gi, '\n$1')
-        .replace(/\s+([A-D][\.:])\s+/g, ' $1 ');
+    // Trích xuất bảng đáp án từ văn bản thô (hỗ trợ cả file PDF & Word có BẢNG ĐÁP ÁN ở cuối đề)
+    function extractAnswerKeyFromRawText(rawText, preDetectedMap = {}) {
+      const ansMap = { ...preDetectedMap };
+      if (!rawText) return ansMap;
 
-      // Tách từng câu hỏi theo mẫu Question 1. / Câu 1: / 1.
-      const regexSplit = /(?:^|\n)\s*(?:Question|Câu)?\s*(\d{1,2})[\.:]\s+/gi;
+      const clean = cleanVietnameseUnicode(rawText).replace(/\[\[ANS_MARK\]\]/g, '');
+      const keySectionMatch = clean.split(/\n\s*(?:BẢNG\s+ĐÁP\s+ÁN|ĐÁP\s+ÁN\s+CHI\s+TIẾT|ĐÁP\s+ÁN|ANSWER\s+KEY|HƯỚNG\s+DẪN\s+GIẢI)\b/i);
+      const targetText = keySectionMatch.length > 1 ? keySectionMatch.slice(1).join('\n') : clean;
+
+      // 1. Dạng liệt kê: 1.A 2.B hoặc 1-A, 2-B hoặc Câu 1: A
+      const pairRegex = /(?:^|\s|\||\(|\b)(?:Câu|Question|Q)?\s*(\d{1,2})\s*(?:[\.:\-\)\/\s])\s*([A-D])(?=\s|$|\||,|;|\)|\.|\b)/gi;
+      let m;
+      while ((m = pairRegex.exec(targetText)) !== null) {
+        const qNum = parseInt(m[1], 10);
+        if (qNum >= 1 && qNum <= 60 && !ansMap[qNum]) {
+          ansMap[qNum] = m[2].toUpperCase();
+        }
+      }
+
+      // 2. Dạng bảng 2 hàng tách rời trong PDF: Hàng số [1 2 3...] ngay trên hàng chữ cái [A C D...]
+      const lines = targetText.split('\n').map(l => l.trim()).filter(Boolean);
+      for (let i = 0; i < lines.length - 1; i++) {
+        const nums = lines[i].match(/\b\d{1,2}\b/g);
+        const letters = lines[i + 1].match(/\b[A-D]\b/g);
+        if (nums && letters && nums.length >= 3 && nums.length === letters.length) {
+          nums.forEach((nStr, idx) => {
+            const qNum = parseInt(nStr, 10);
+            if (qNum >= 1 && qNum <= 60) {
+              ansMap[qNum] = letters[idx].toUpperCase();
+            }
+          });
+        }
+      }
+
+      // 3. Dạng chuỗi đáp án liên tiếp ở cuối đề (1A 2C 3D 4B...)
+      const compactRegex = /\b(\d{1,2})([A-D])\b/g;
+      let cm;
+      while ((cm = compactRegex.exec(targetText)) !== null) {
+        const qNum = parseInt(cm[1], 10);
+        if (qNum >= 1 && qNum <= 60 && !ansMap[qNum]) {
+          ansMap[qNum] = cm[2].toUpperCase();
+        }
+      }
+
+      return ansMap;
+    }
+
+    // =========================================================================
+    // 2. BỘ PHÂN TÍCH ĐỀ THI & SINH ĐỀ HOÀN CHỈNH / ĐỀ TƯƠNG TỰ
+    // =========================================================================
+    function parseAndGenerateSimilarFromText(rawText, subject, grade, topic, options = {}) {
+      const { richBlocks = {}, pageImages = {}, answerHints = {}, mode = 'similar' } = options;
+      const isEnglish = subject === 'Tiếng Anh';
+      const normalized = cleanVietnameseUnicode(rawText);
+      const answerKeyMap = extractAnswerKeyFromRawText(normalized, answerHints);
+
+      // Cắt bỏ phần bảng đáp án ở cuối để không bị nhận nhầm thành câu hỏi
+      const bodyOnly = normalized.split(/\n\s*(?:BẢNG\s+ĐÁP\s+ÁN|ĐÁP\s+ÁN\s+CHI\s+TIẾT|ANSWER\s+KEY|HƯỚNG\s+DẪN\s+GIẢI)\b/i)[0];
+
+      // Tìm vị trí từng câu hỏi: Câu 1., Câu 1:, Question 1., 1., 1)
+      const regexSplit = /(?:^|\n)\s*(?:Câu|Question)\s*(\d{1,2})\s*[\.:\)]\s*/gi;
       const matches = [];
       let m;
-      while ((m = regexSplit.exec(normalized)) !== null) {
+      while ((m = regexSplit.exec(bodyOnly)) !== null) {
         matches.push({
-          num: parseInt(m[1], 10),
-          index: m.index,
+          qNum: parseInt(m[1], 10),
+          start: m.index,
           contentStart: m.index + m[0].length
         });
       }
 
       const results = [];
-      const fallbackContexts = [
-        'Digital transformation and sustainable development in modern society',
-        'Environmental conservation, green energy, and climate resilience',
-        'Smart agriculture, precision technology, and food security',
-        'Lifelong learning, artificial intelligence, and future career skills',
-        'Urban planning, public health, and community well-being'
-      ];
+      for (let idx = 0; idx < matches.length; idx++) {
+        const curMatch = matches[idx];
+        const nextMatch = matches[idx + 1];
+        const rawBlock = bodyOnly.slice(curMatch.contentStart, nextMatch ? nextMatch.start : bodyOnly.length).trim();
+        if (!rawBlock) continue;
 
-      // Nếu tìm thấy danh sách câu hỏi trong file PDF / Word
-      if (matches.length > 0) {
-        matches.forEach((item, idx) => {
-          const endPos = idx + 1 < matches.length ? matches[idx + 1].index : normalized.length;
-          const rawBlock = normalized.slice(item.contentStart, endPos).trim();
-          const qNum = item.num || (idx + 1);
+        // Kiểm tra xem câu này thuộc trang PDF nào (nếu có)
+        const textBefore = bodyOnly.slice(0, curMatch.start);
+        const pageMarkers = Array.from(textBefore.matchAll(/\[\[PAGE_(\d+)\]\]/g));
+        const currentPageNum = pageMarkers.length > 0 ? parseInt(pageMarkers[pageMarkers.length - 1][1], 10) : 1;
+        const pageImg = pageImages[currentPageNum] || null;
 
-          // Tách 4 phương án A. B. C. D. (hỗ trợ cả khi nằm cùng 1 dòng hoặc nhiều dòng)
-          const optRegex = /([\s\S]*?)\bA[\.:]\s*([\s\S]*?)\bB[\.:]\s*([\s\S]*?)\bC[\.:]\s*([\s\S]*?)\bD[\.:]\s*([\s\S]*)/i;
-          const optMatch = rawBlock.match(optRegex);
+        // Tách các khối bảng biểu / hình ảnh Word ([[RICH_BLOCK_x]])
+        let matchedRichHtml = '';
+        const cleanedBlock = rawBlock.replace(/\[\[RICH_BLOCK_(\d+)\]\]/g, (tok) => {
+          if (richBlocks[tok]) matchedRichHtml += richBlocks[tok];
+          return '';
+        }).replace(/\[\[PAGE_\d+\]\]/g, '').trim();
 
-          let qBody = rawBlock;
-          let options = [
-            `Option A (Adapted from Q${qNum})`,
-            `Option B (Adapted from Q${qNum})`,
-            `Option C (Adapted from Q${qNum})`,
-            `Option D (Adapted from Q${qNum})`
+        // Tìm vị trí 4 phương án A., B., C., D. (cho phép có [[ANS_MARK]] nằm trước hoặc ngay sau chữ cái phương án)
+        const findMarkerPos = (letter, searchFrom) => {
+          const re = new RegExp(`(?:^|\\n|\\s)(?:\\[\\[ANS_MARK\\]\\]\\s*)*(\\*?)${letter}\\s*(?:\\[\\[ANS_MARK\\]\\]\\s*)*[\\.:\\)]\\s*(?:\\[\\[ANS_MARK\\]\\]\\s*)*`, 'g');
+          re.lastIndex = searchFrom;
+          const found = re.exec(cleanedBlock);
+          return found
+            ? {
+                start: found.index,
+                contentStart: found.index + found[0].length,
+                markerMarked: found[0].includes('[[ANS_MARK]]') || found[1] === '*'
+              }
+            : null;
+        };
+
+        const posA = findMarkerPos('A', 0);
+        const posB = posA ? findMarkerPos('B', posA.contentStart) : null;
+        const posC = posB ? findMarkerPos('C', posB.contentStart) : null;
+        const posD = posC ? findMarkerPos('D', posC.contentStart) : null;
+
+        const qNum = curMatch.qNum;
+
+        if (posA && posB && posC && posD) {
+          const questionStemRaw = cleanedBlock.slice(0, posA.start).replace(/\[\[ANS_MARK\]\]/g, '').trim();
+          const rawOpts = [
+            cleanedBlock.slice(posA.contentStart, posB.start),
+            cleanedBlock.slice(posB.contentStart, posC.start),
+            cleanedBlock.slice(posC.contentStart, posD.start),
+            cleanedBlock.slice(posD.contentStart)
           ];
 
-          if (optMatch) {
-            qBody = optMatch[1].replace(/\s+/g, ' ').trim();
-            const cleanOpt = (s, fb) => {
-              const t = (s || '').replace(/\s+/g, ' ').split(/(?:TAILIEUDIEUKY|Trang\s+\d+\/\d+|THE END|Read the following)/i)[0].trim();
-              return t || fb;
-            };
-            options = [
-              cleanOpt(optMatch[2], options[0]),
-              cleanOpt(optMatch[3], options[1]),
-              cleanOpt(optMatch[4], options[2]),
-              cleanOpt(optMatch[5], options[3])
-            ];
-          } else {
-            qBody = qBody.replace(/\s+/g, ' ').trim();
-          }
-
-          if (!qBody) {
-            qBody = isEnglish
-              ? `Choose the best option (A, B, C, or D) to complete Question ${qNum} regarding ${fallbackContexts[idx % fallbackContexts.length]}.`
-              : `Xác định nhận định đúng nhất cho Câu ${qNum} thuộc chuyên đề ${topic}.`;
-          }
-
-          let finalQuestion = qBody.slice(0, 750);
-          let correctIdx = 0;
-
-          if (generateSimilarMode) {
-            const factor = (idx % 3) + 2;
-            if (!isEnglish) {
-              finalQuestion = finalQuestion.replace(/\b(\d+)\b/g, (numStr) => {
-                const num = parseInt(numStr, 10);
-                if (num >= 10 && num <= 5000 && num !== 2018 && num !== 2025 && num !== 2026) {
-                  return String(num * factor);
-                }
-                return numStr;
-              });
-            } else {
-              // Biến đổi nhẹ từ vựng dẫn nhập để tạo câu luyện tập tương tự
-              finalQuestion = finalQuestion
-                .replace(/in paragraph (\d+)/gi, (_, p) => `in section ${p}`)
-                .replace(/mostly means/gi, 'is closest in meaning to')
-                .replace(/best summarises/gi, 'most accurately captures the main idea of');
+          let markedCorrectIdx = -1;
+          const markerFlags = [posA.markerMarked, posB.markerMarked, posC.markerMarked, posD.markerMarked];
+          const cleanOpts = rawOpts.map((optStr, oIdx) => {
+            if (markerFlags[oIdx] || optStr.includes('[[ANS_MARK]]')) {
+              markedCorrectIdx = oIdx;
             }
+            return optStr.replace(/\[\[ANS_MARK\]\]/g, '').replace(/\s+/g, ' ').trim();
+          });
 
-            const rightAnswerText = options[0];
-            const shuffled = [...options].sort(() => Math.random() - 0.5);
-            correctIdx = shuffled.indexOf(rightAnswerText);
-            options = shuffled;
+          // Nếu chế độ là 'similar' và không phải Tiếng Anh, biến đổi nhẹ số liệu độc lập trong đề dẫn
+          let finalQuestionText = questionStemRaw;
+          if (mode === 'similar' && !isEnglish && !matchedRichHtml && !pageImg) {
+            finalQuestionText = finalQuestionText.replace(/\b(\d+)\b/g, (numStr) => {
+              const v = parseInt(numStr, 10);
+              if (v >= 12 && v <= 2000 && v !== 2018 && v !== 2025 && v !== 2026) {
+                return String(v * 2);
+              }
+              return numStr;
+            });
+          }
+
+          let detectedOrigCorrect = -1;
+          let answerSourceNote = '';
+          if (markedCorrectIdx >= 0) {
+            detectedOrigCorrect = markedCorrectIdx;
+            answerSourceNote = 'Nhận diện từ đánh dấu màu / gạch dưới / in đậm';
+          } else if (answerKeyMap[qNum]) {
+            detectedOrigCorrect = Math.max(0, ['A', 'B', 'C', 'D'].indexOf(answerKeyMap[qNum]));
+            answerSourceNote = `Nhận diện từ Bảng đáp án (${answerKeyMap[qNum]})`;
+          } else if (answerKeyMap[idx + 1]) {
+            detectedOrigCorrect = Math.max(0, ['A', 'B', 'C', 'D'].indexOf(answerKeyMap[idx + 1]));
+            answerSourceNote = `Nhận diện từ Bảng đáp án (${answerKeyMap[idx + 1]})`;
+          } else {
+            detectedOrigCorrect = 0;
+            answerSourceNote = '⚠️ File gốc chưa có bảng đáp án / tô màu (tạm đặt A)';
+          }
+
+          const originalCorrectText = cleanOpts[detectedOrigCorrect];
+          let finalOptions = [...cleanOpts];
+          let finalCorrect = detectedOrigCorrect;
+
+          if (mode === 'similar') {
+            finalOptions = [...cleanOpts].sort(() => Math.random() - 0.5);
+            finalCorrect = Math.max(0, finalOptions.indexOf(originalCorrectText));
           }
 
           results.push({
-            id: `UPLOAD_${Date.now()}_${qNum}_${Math.floor(Math.random() * 9999)}`,
+            id: `${mode === 'exact' ? 'EXACT' : 'SIM'}_${Date.now()}_${idx + 1}`,
             subject,
             grade,
             topic,
             type: 'mcq',
-            question: finalQuestion,
-            options,
-            correct: correctIdx >= 0 ? correctIdx : 0,
-            explanation: generateSimilarMode
-              ? `Câu ${qNum} (Đề tương tự): Đáp án đúng là ${String.fromCharCode(65 + (correctIdx >= 0 ? correctIdx : 0))} — được biến đổi cấu trúc và xáo trộn từ câu ${qNum} của đề gốc.`
-              : `Câu ${qNum}: Trích xuất nguyên bản từ đề thi đính kèm.`,
-            isCloned: generateSimilarMode
+            question: finalQuestionText,
+            options: finalOptions,
+            correct: finalCorrect,
+            richHtml: matchedRichHtml,
+            pageImage: pageImg,
+            explanation: `${mode === 'exact' ? '[Đề gốc]' : '[Đề tương tự]'} ${answerSourceNote}. Đáp án đúng: ${String.fromCharCode(65 + finalCorrect)}.`
           });
-        });
-      }
-
-      // Nếu file PDF là bản scan ảnh hoặc quá ít câu tách được, tự động bổ sung đủ bộ đề 40 câu chuẩn cấu trúc THPT
-      if (results.length < 5) {
-        const targetCount = 40;
-        for (let i = results.length + 1; i <= targetCount; i++) {
-          const ctx = fallbackContexts[i % fallbackContexts.length];
-          const opts = isEnglish
-            ? [
-                `Grammatically and contextually accurate choice for item #${i}`,
-                `Incorrect verb tense or passive voice form in context #${i}`,
-                `Inappropriate lexical collocation or preposition #${i}`,
-                `Illogical discourse connector or relative clause #${i}`
-              ]
-            : [
-                `Phương án chuẩn xác về bản chất khoa học (${topic} - Câu ${i})`,
-                `Nhận định sai lệch về cơ chế điều hòa tự nhiên`,
-                `Kết luận chỉ đúng trong điều kiện phòng thí nghiệm nhân tạo`,
-                `Phát biểu nhầm lẫn giữa các cấp độ tổ chức`
-              ];
-          const rightText = opts[0];
-          const shuffled = [...opts].sort(() => Math.random() - 0.5);
-          const cIdx = Math.max(0, shuffled.indexOf(rightText));
-
+        } else {
+          const cleanStem = cleanedBlock.replace(/\[\[ANS_MARK\]\]/g, '').trim();
           results.push({
-            id: `GEN_FULL_${Date.now()}_${i}_${Math.floor(Math.random() * 9999)}`,
+            id: `${mode === 'exact' ? 'EXACT' : 'SIM'}_${Date.now()}_${idx + 1}`,
             subject,
             grade,
             topic,
-            type: 'mcq',
-            question: isEnglish
-              ? `[Theme: ${ctx}] Choose the letter A, B, C, or D to indicate the best answer for question ${i}.`
-              : `[${topic}] Câu ${i}: Chọn phương án đúng nhất (A, B, C hoặc D) phù hợp với tình huống thực tiễn.`,
-            options: shuffled,
-            correct: cIdx,
-            explanation: `Đáp án ${String.fromCharCode(65 + cIdx)} chuẩn xác theo cấu trúc đề thi Tốt nghiệp THPT.`,
-            isCloned: true
+            type: isEnglish ? 'mcq' : 'sa',
+            question: cleanStem,
+            options: isEnglish ? ['Option A', 'Option B', 'Option C', 'Option D'] : undefined,
+            correct: isEnglish ? 0 : undefined,
+            correctAnswer: !isEnglish ? (answerKeyMap[qNum] || answerKeyMap[idx + 1] || '100') : undefined,
+            richHtml: matchedRichHtml,
+            pageImage: pageImg,
+            explanation: `${mode === 'exact' ? '[Đề gốc]' : '[Đề tương tự]'} Đã giữ nguyên dữ liệu câu hỏi.`
           });
         }
       }
-
       return results;
     }
 
-    // Xuất bộ câu hỏi bất kỳ thành file Word (.doc) mở trực tiếp trên MS Word
-    function downloadExamAsWordDoc(questionList, examTitle, subject, grade, examCode = '2026') {
-      const headerHtml = `
-        <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
-        <head><meta charset='utf-8'><title>${examTitle}</title>
-        <style>
-          body { font-family: "Times New Roman", serif; font-size: 13pt; line-height: 1.45; }
-          table.head { width: 100%; border-collapse: collapse; margin-bottom: 16px; border-bottom: 2px solid #000; }
-          table.head td { text-align: center; vertical-align: top; padding: 4px; }
-          .q-block { margin-bottom: 12px; }
-          .opt-grid { margin-left: 20px; }
-          table.ans { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 11pt; }
-          table.ans td, table.ans th { border: 1px solid #000; padding: 5px; text-align: center; }
-        </style>
-        </head><body>
-        <table class="head">
-          <tr>
-            <td style="width:45%"><b>SỞ GIÁO DỤC VÀ ĐÀO TẠO</b><br/><b>LỚP ÔN THI THẦY TRƯƠNG TRUNG CAN</b><br/><i>(Đề thi gồm ${questionList.length} câu hỏi)</i></td>
-            <td style="width:55%"><b>${examTitle.toUpperCase()}</b><br/><b>Môn: ${subject.toUpperCase()} - Khối ${grade}</b><br/><i>Thời gian làm bài: 50 phút</i><br/><b>Mã đề: ${examCode}</b></td>
-          </tr>
-        </table>
-      `;
-
-      const bodyHtml = questionList.map((q, idx) => {
-        const optsHtml = Array.isArray(q.options)
-          ? `<div class="opt-grid">${q.options.map((o, oi) => `<div><b>${String.fromCharCode(65 + oi)}.</b> ${o}</div>`).join('')}</div>`
-          : '';
-        return `<div class="q-block"><b>Question ${idx + 1}:</b> ${q.question}${optsHtml}</div>`;
+    function downloadExamAsWordDoc(examTitle, examCode, teacherName, timeAllowed, subject, grade, questionsList) {
+      const isEnglish = subject === 'Tiếng Anh';
+      const labelWord = isEnglish ? 'Question' : 'Câu';
+      const questionsHtml = questionsList.map((q, idx) => {
+        const optsHtml = (q.options || []).map((opt, oi) =>
+          `<div style="margin-left:20px;margin-top:3px;"><b>${String.fromCharCode(65 + oi)}.</b> ${opt}</div>`
+        ).join('');
+        const imgHtml = q.pageImage ? `<div style="margin:6px 0;"><img src="${q.pageImage}" style="max-width:480px;height:auto;" /></div>` : '';
+        return `
+          <div style="margin-bottom:12px;">
+            <div><b>${labelWord} ${idx + 1}:</b> ${q.question}</div>
+            ${q.richHtml ? `<div>${q.richHtml}</div>` : ''}
+            ${imgHtml}
+            ${optsHtml}
+          </div>
+        `;
       }).join('');
 
-      const answerRows = [];
-      for (let i = 0; i < questionList.length; i += 10) {
-        const chunk = questionList.slice(i, i + 10);
-        answerRows.push(`
-          <tr>
-            <th>Câu</th>
-            ${chunk.map((_, k) => `<th>${i + k + 1}</th>`).join('')}
-          </tr>
-          <tr>
-            <td><b>Đáp án</b></td>
-            ${chunk.map(q => `<td><b>${q.type === 'mcq' ? String.fromCharCode(65 + (q.correct || 0)) : (q.correctAnswer || 'Đ/S')}</b></td>`).join('')}
-          </tr>
-        `);
-      }
+      const keyCells = questionsList.map((q, i) => {
+        const ans = q.type === 'mcq' ? String.fromCharCode(65 + (q.correct || 0)) : (q.correctAnswer || 'Đ/S');
+        return `<td style="border:1px solid #000;padding:4px;text-align:center;"><b>${i + 1}</b><br/>${ans}</td>`;
+      }).join('');
 
-      const footerHtml = `
-        <h3 style="text-align:center; margin-top:24px;">BẢNG ĐÁP ÁN CHI TIẾT - MÃ ĐỀ ${examCode}</h3>
-        <table class="ans">${answerRows.join('')}</table>
-        <div style="margin-top:16px;">
-          <h4>HƯỚNG DẪN GIẢI:</h4>
-          ${questionList.map((q, i) => `<p style="margin:4px 0; font-size:11pt;"><b>Câu ${i + 1}:</b> ${q.explanation || ''}</p>`).join('')}
-        </div>
-        </body></html>
+      const fullHtml = `\uFEFF
+        <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+        <head><meta http-equiv="Content-Type" content="text/html; charset=utf-8"><title>${examTitle}</title></head>
+        <body style="font-family:'Times New Roman',serif;font-size:13pt;line-height:1.4;">
+          <table style="width:100%;border-bottom:2px solid #000;margin-bottom:16px;">
+            <tr>
+              <td style="text-align:center;width:45%;"><b>SỞ GIÁO DỤC & ĐÀO TẠO</b><br/><b>${teacherName.toUpperCase()}</b></td>
+              <td style="text-align:center;width:55%;"><b>${examTitle.toUpperCase()}</b><br/>Môn: ${subject} - Khối ${grade}<br/>Thời gian: ${timeAllowed} phút | Mã đề: <b>${examCode}</b></td>
+            </tr>
+          </table>
+          ${questionsHtml}
+          <h4 style="margin-top:20px;">BẢNG ĐÁP ÁN MÃ ĐỀ ${examCode}</h4>
+          <table style="border-collapse:collapse;width:100%;"><tr>${keyCells}</tr></table>
+        </body>
+        </html>
       `;
 
-      const blob = new Blob(['\ufeff', headerHtml + bodyHtml + footerHtml], { type: 'application/msword' });
+      const blob = new Blob([fullHtml], { type: 'application/msword;charset=utf-8' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `De_Tuong_Tu_${subject.replace(/\s+/g, '_')}_Khoi${grade}_Ma${examCode}.doc`;
+      a.download = `De_${subject.replace(/\s+/g, '_')}_Ma_${examCode}.doc`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
     }
 
-    // Sinh biến thể tương tự từ 1 bộ đề có sẵn trong ngân hàng (Không cần API Key)
-    function cloneExistingTopicQuestions(sourceQuestions, targetTopicName, variantNumber) {
-      return sourceQuestions.map((q, idx) => {
-        const isEnglish = q.subject === 'Tiếng Anh';
-        const effectiveType = isEnglish ? 'mcq' : (q.type || 'mcq');
-        let newText = q.question || '';
-
-        if (!isEnglish) {
-          const mult = (variantNumber % 3) + 2;
-          newText = newText.replace(/\b(\d+)\b/g, (m) => {
-            const v = parseInt(m, 10);
-            if (v >= 10 && v <= 4000 && v !== 2018 && v !== 2025 && v !== 2026) return String(v * mult);
-            return m;
-          });
-        }
-
-        const tag = isEnglish ? `[Variant #${variantNumber}] ` : `[Biến thể #${variantNumber}] `;
-        const cleanBase = newText.replace(/^\[(Variant|Biến thể|Similar Practice|Đề tương tự)[^\]]*\]\s*/i, '');
-
-        if (effectiveType === 'mcq') {
-          const opts = Array.isArray(q.options) && q.options.length === 4
-            ? [...q.options]
-            : ['Option A', 'Option B', 'Option C', 'Option D'];
-          const rightText = opts[q.correct] ?? opts[0];
-          const shuffled = [...opts].sort(() => Math.random() - 0.5);
-          return {
-            ...q,
-            id: `SIM_${Date.now()}_${variantNumber}_${idx + 1}`,
-            topic: targetTopicName || q.topic,
-            type: 'mcq',
-            question: tag + cleanBase,
-            options: shuffled,
-            correct: Math.max(0, shuffled.indexOf(rightText)),
-            items: undefined,
-            correctAnswer: undefined,
-            explanation: `[Đề tương tự #${variantNumber}] ${q.explanation || ''}`,
-            isCloned: true
-          };
-        }
-
-        return {
-          ...q,
-          id: `SIM_${Date.now()}_${variantNumber}_${idx + 1}`,
-          topic: targetTopicName || q.topic,
-          type: effectiveType,
-          question: tag + cleanBase,
-          explanation: `[Đề tương tự #${variantNumber}] ${q.explanation || ''}`,
-          isCloned: true
-        };
-      });
-    }
-
-    // =========================================================================
-    // 3. NGÂN HÀNG DỮ LIỆU CHUẨN GDPT 2018 & BỘ ĐỀ TIẾNG ANH CHUẨN 3 ĐỀ ĐÍNH KÈM
-    // =========================================================================
     const SUBJECT_GRADE_TOPICS = {
       'Sinh học': {
         '10': ['Sinh học tế bào & Thành phần hóa học', 'Chuyển hóa vật chất & Năng lượng', 'Phân bào & Sinh học vi sinh vật'],
@@ -396,535 +655,138 @@
         '12': ['Công nghệ Trồng trọt Kĩ thuật cao', 'Công nghệ Chăn nuôi hiện đại', 'Lâm nghiệp & Bảo vệ Tài nguyên Rừng', 'Công nghệ Thủy sản Bền vững']
       },
       'Tiếng Anh': {
-        '10': [
-          'Đề Tiếng Anh 10 - Số 1 (Cấu trúc 2025+): Family Life & Green Living',
-          'Đề Tiếng Anh 10 - Số 2 (Cấu trúc 2025+): Inventions & Community'
-        ],
-        '11': [
-          'Đề Tiếng Anh 11 - Số 1 (Cấu trúc 2025+): Generation Gap & ASEAN',
-          'Đề Tiếng Anh 11 - Số 2 (Cấu trúc 2025+): Global Warming & Heritage'
-        ],
+        '10': ['English 10 - Đề 1 (Cấu trúc 2025+): Family & Green Living', 'English 10 - Đề 2 (Cấu trúc 2025+): Inventions & Music'],
+        '11': ['English 11 - Đề 1 (Cấu trúc 2025+): Generation Gap & ASEAN', 'English 11 - Đề 2 (Cấu trúc 2025+): Global Warming & Heritage'],
         '12': [
           'Đề 1 (Chuẩn Đề Chính Thức 2025 - Mã 1102): Project Farming & DIFF 2025',
           'Đề 2 (Chuẩn Đề Chính Thức 2026 - Mã 1101): Green Hands & Psychology of Money',
           'Đề 3 (Chuẩn Đề Minh Họa Lần 2): Meet & Seat & Humanoid Robots',
-          'Đề 4 (Đề Tương Tự Cấu Trúc 3 Đề Mẫu #1): Smart Agriculture & Eco-Tourism',
-          'Đề 5 (Đề Tương Tự Cấu Trúc 3 Đề Mẫu #2): Urban Regeneration & AI Education'
+          'Đề 4 (Đề Tương Tự Mở Rộng #1): Smart Agriculture & Eco-Tourism',
+          'Đề 5 (Đề Tương Tự Mở Rộng #2): Urban Regeneration & AI in Education'
         ]
       }
     };
 
-    // Bộ câu hỏi Tiếng Anh chuẩn xác trích từ 3 đề đính kèm (100% MCQ 4 lựa chọn)
-    const ENGLISH_EXAMS_SEED = [
-      // --- ĐỀ 1: MÃ ĐỀ 1102 (KỲ THI TỐT NGHIỆP THPT NĂM 2025) ---
-      {
-        id: 'EN12_1102_Q1', subject: 'Tiếng Anh', grade: '12',
-        topic: 'Đề 1 (Chuẩn Đề Chính Thức 2025 - Mã 1102): Project Farming & DIFF 2025',
-        type: 'mcq',
-        question: '[Reading: Project Farming] "Because everyone works on the same data, the team can settle seeding dates, determine when to spray, and track machinery in real time." — The word "settle" in paragraph 1 mostly means _______.',
-        options: ['exchange', 'announce', 'expect', 'decide'],
-        correct: 3,
-        explanation: 'Đáp án D (decide = quyết định/ấn định). Trong ngữ cảnh thống nhất ngày gieo hạt dựa trên dữ liệu chung, "settle" đồng nghĩa với "decide".'
-      },
-      {
-        id: 'EN12_1102_Q2', subject: 'Tiếng Anh', grade: '12',
-        topic: 'Đề 1 (Chuẩn Đề Chính Thức 2025 - Mã 1102): Project Farming & DIFF 2025',
-        type: 'mcq',
-        question: '[Reading: Project Farming] Which of the following is NOT mentioned in paragraph 1 as information displayed on a live, shared picture?',
-        options: ['weather shifts', 'soil types', 'plant growth', 'drones'],
-        correct: 3,
-        explanation: 'Đáp án D (drones). Đoạn 1 nêu: "GPS mapping, drones, and in-field sensors build a live, shared picture of soil types, weather shifts, and plant growth." Drones là công cụ thu thập chứ không phải thông tin hiển thị.'
-      },
-      {
-        id: 'EN12_1102_Q4', subject: 'Tiếng Anh', grade: '12',
-        topic: 'Đề 1 (Chuẩn Đề Chính Thức 2025 - Mã 1102): Project Farming & DIFF 2025',
-        type: 'mcq',
-        question: '[Reading: Project Farming] Which of the following best paraphrases: "Because inputs go exactly where they help, fields yield more while chemical runoff falls."?',
-        options: [
-          'As resources are directed to the areas that need them, harvests increase and pollution from excess chemicals declines.',
-          'When chemicals are placed only where they are needed, productivity increases yet more overdue chemicals are released.',
-          'Precise application of fertilisers and sprays to required areas raises crop output but in turn increases chemical wastage.',
-          'There is an increase in chemical wastage and crop output though fewer resources are used for the indicated land area.'
-        ],
-        correct: 0,
-        explanation: 'Đáp án A diễn đạt chuẩn xác ý: đầu vào đi đúng nơi cần thiết giúp năng suất tăng ("harvests increase") và lượng hóa chất dư thừa chảy tràn giảm ("pollution from excess chemicals declines").'
-      },
-      {
-        id: 'EN12_1102_Q5', subject: 'Tiếng Anh', grade: '12',
-        topic: 'Đề 1 (Chuẩn Đề Chính Thức 2025 - Mã 1102): Project Farming & DIFF 2025',
-        type: 'mcq',
-        question: '[Reading: Project Farming] "Automated pumps deliver measured water amounts to thirsty zones and stop when a storm is coming, slashing waste and energy bills." — The word "slashing" is OPPOSITE in meaning to _______.',
-        options: ['disposing', 'converting', 'increasing', 'reducing'],
-        correct: 2,
-        explanation: 'Đáp án C (increasing). "Slashing" nghĩa là cắt giảm mạnh, trái nghĩa với "increasing" (tăng lên).'
-      },
-      {
-        id: 'EN12_1102_Q9', subject: 'Tiếng Anh', grade: '12',
-        topic: 'Đề 1 (Chuẩn Đề Chính Thức 2025 - Mã 1102): Project Farming & DIFF 2025',
-        type: 'mcq',
-        question: '[Announcement: DIFF 2025] "With ten teams worldwide, DIFF 2025 features the largest _______ of participating teams in its history..."',
-        options: ['volume', 'amount', 'number', 'level'],
-        correct: 2,
-        explanation: 'Đáp án C (number). Cấu trúc "the largest number of + danh từ đếm được số nhiều (participating teams)".'
-      },
-      {
-        id: 'EN12_1102_Q11', subject: 'Tiếng Anh', grade: '12',
-        topic: 'Đề 1 (Chuẩn Đề Chính Thức 2025 - Mã 1102): Project Farming & DIFF 2025',
-        type: 'mcq',
-        question: '[Announcement: DIFF 2025] "Z121 Vina Pyrotech, a company _______ by Vietnam Ministry of National Defence, is a newcomer this year."',
-        options: ['managed', 'managing', 'has managed', 'is managing'],
-        correct: 0,
-        explanation: 'Đáp án A (managed). Rút gọn mệnh đề quan hệ dạng bị động ("which is managed by...").'
-      },
-      {
-        id: 'EN12_1102_Q15', subject: 'Tiếng Anh', grade: '12',
-        topic: 'Đề 1 (Chuẩn Đề Chính Thức 2025 - Mã 1102): Project Farming & DIFF 2025',
-        type: 'mcq',
-        question: '[Arrangement] Choose the best arrangement of sentences:\na. I had to burn the midnight oil to make engaging lesson plans, expecting to capture my students\' attention.\nb. The reality, however, was not what I had expected when I completely failed to keep the class under control.\nc. This valuable experience was indeed memorable and made me more confident in my career of choice.\nd. Working as an intern at a local high school encouraged me to pursue a teaching career, a demanding yet rewarding one.\ne. Instead of giving up, I reflected on what I had done and made improvements in the following lessons.',
-        options: ['c - b - e - a - d', 'c - a - e - d - b', 'd - a - b - e - c', 'd - b - e - c - a'],
-        correct: 2,
-        explanation: 'Đáp án C (d - a - b - e - c): Giới thiệu kỳ thực tập (d) -> soạn giáo án thâu đêm (a) -> thực tế khó khăn (b) -> rút kinh nghiệm cải thiện (e) -> kết luận bài học quý giá (c).'
-      },
-      {
-        id: 'EN12_1102_Q33', subject: 'Tiếng Anh', grade: '12',
-        topic: 'Đề 1 (Chuẩn Đề Chính Thức 2025 - Mã 1102): Project Farming & DIFF 2025',
-        type: 'mcq',
-        question: '[Leaflet: How to Manage Your Money Wisely?] "Buy _______ within your price range."',
-        options: ['affordable products quality', 'products affordable quality', 'affordable quality products', 'products quality affordable'],
-        correct: 2,
-        explanation: 'Đáp án C (affordable quality products). Trật tự tính từ bổ nghĩa cho danh từ: Tính từ chỉ giá cả/đánh giá (affordable) + danh từ đóng vai trò tính từ (quality) + danh từ chính (products).'
-      },
-
-      // --- ĐỀ 2: MÃ ĐỀ 1101 (KỲ THI TỐT NGHIỆP THPT NĂM 2026) ---
-      {
-        id: 'EN12_1101_Q1', subject: 'Tiếng Anh', grade: '12',
-        topic: 'Đề 2 (Chuẩn Đề Chính Thức 2026 - Mã 1101): Green Hands & Psychology of Money',
-        type: 'mcq',
-        question: '[Leaflet: GREEN HANDS CAMPAIGN] "If everyone _______ together, we will make a difference at our school."',
-        options: ['work', 'worked', 'have worked', 'works'],
-        correct: 3,
-        explanation: 'Đáp án D (works). Câu điều kiện loại 1 ("If + S + V(s/es), S + will + V"), chủ ngữ "everyone" chia động từ số ít.'
-      },
-      {
-        id: 'EN12_1101_Q3', subject: 'Tiếng Anh', grade: '12',
-        topic: 'Đề 2 (Chuẩn Đề Chính Thức 2026 - Mã 1101): Green Hands & Psychology of Money',
-        type: 'mcq',
-        question: '[Leaflet: GREEN HANDS CAMPAIGN] "To achieve this, the school will have colour-coded bins _______ in the schoolyard."',
-        options: ['install', 'being installed', 'installed', 'installing'],
-        correct: 2,
-        explanation: 'Đáp án C (installed). Cấu trúc thể truyền khiến bị động: "have + something + V3/ed" (cho lắp đặt các thùng rác phân loại màu).'
-      },
-      {
-        id: 'EN12_1101_Q10', subject: 'Tiếng Anh', grade: '12',
-        topic: 'Đề 2 (Chuẩn Đề Chính Thức 2026 - Mã 1101): Green Hands & Psychology of Money',
-        type: 'mcq',
-        question: '[Arrangement] Choose the best arrangement of utterances:\na. Celine: Why do you say so?\nb. Celine: I\'ve been considering taking a gap year. What\'s your view?\nc. Celine: Thanks. I\'ll think about it.\nd. Steward: The thing is, your studies won\'t be interrupted.\ne. Steward: If I were you, I would go to university right after graduating from high school.',
-        options: ['b - e - a - d - c', 'b - d - a - e - c', 'a - d - b - e - c', 'a - e - b - d - c'],
-        correct: 0,
-        explanation: 'Đáp án A (b - e - a - d - c): Celine hỏi ý kiến về gap year (b) -> Steward khuyên học đại học ngay (e) -> Celine hỏi lý do (a) -> Steward giải thích (d) -> Celine cảm ơn (c).'
-      },
-      {
-        id: 'EN12_1101_Q12', subject: 'Tiếng Anh', grade: '12',
-        topic: 'Đề 2 (Chuẩn Đề Chính Thức 2026 - Mã 1101): Green Hands & Psychology of Money',
-        type: 'mcq',
-        question: '[Reading: Psychology of Money] "When a sleek Lamborghini glides past, it is normal _______."',
-        options: [
-          'for concluding that the person must be doing well behind the wheel',
-          'a good conclusion about whoever sits behind the wheel must be',
-          'a good conclusion about the wheel behind which the person must sit',
-          'to conclude that whoever sits behind the wheel must be doing well'
-        ],
-        correct: 3,
-        explanation: 'Đáp án D. Cấu trúc chủ ngữ giả: "It is + adj (normal) + to V (to conclude that...)".'
-      },
-      {
-        id: 'EN12_1101_Q17', subject: 'Tiếng Anh', grade: '12',
-        topic: 'Đề 2 (Chuẩn Đề Chính Thức 2026 - Mã 1101): Green Hands & Psychology of Money',
-        type: 'mcq',
-        question: '[Reading: Environmental Opportunity Costs] "The opportunity cost for environmental services is the net benefit forgone..." — The word "forgone" in paragraph 1 is closest in meaning to _______.',
-        options: ['given up', 'ended up', 'filled up', 'made up'],
-        correct: 0,
-        explanation: 'Đáp án A (given up = từ bỏ / hy sinh). "Forgone" (quá khứ phân từ của forgo) nghĩa là từ bỏ lợi ích để chọn phương án khác.'
-      },
-      {
-        id: 'EN12_1101_Q28', subject: 'Tiếng Anh', grade: '12',
-        topic: 'Đề 2 (Chuẩn Đề Chính Thức 2026 - Mã 1101): Green Hands & Psychology of Money',
-        type: 'mcq',
-        question: '[Advertisement: Summer Part-time Jobs] "The better understanding of STEM you have, _______ likely you are to be selected!"',
-        options: ['the most', 'most', 'more', 'the more'],
-        correct: 3,
-        explanation: 'Đáp án D (the more). Cấu trúc so sánh kép: "The + so sánh hơn + S + V, the + so sánh hơn + S + V".'
-      },
-      {
-        id: 'EN12_1101_Q35', subject: 'Tiếng Anh', grade: '12',
-        topic: 'Đề 2 (Chuẩn Đề Chính Thức 2026 - Mã 1101): Green Hands & Psychology of Money',
-        type: 'mcq',
-        question: '[Reading: Handwriting vs Laptops] Which of the following best paraphrases: "The reason, according to the researchers, lies less in the technology itself than in what each method asks of the brain."?',
-        options: [
-          'The modern device, along with the mental requirements of each method for the brain, is responsible for the difference in student performance.',
-          'What explains the difference in student performance is the mental work that each method of notetaking demands, rather than the technology.',
-          'The difference in student performance is attributable to the modern technology instead of the mental work that each method of notetaking requires.',
-          'Regardless of the method of notetaking, the effects on the brain exhibit little difference as long as technology is involved.'
-        ],
-        correct: 1,
-        explanation: 'Đáp án B diễn đạt chính xác: nguyên nhân nằm ở hoạt động trí não mà mỗi phương pháp đòi hỏi ("the mental work that each method demands") hơn là bản thân công nghệ ("rather than the technology").'
-      },
-
-      // --- ĐỀ 3: ĐỀ MINH HỌA LẦN 2 - K12 TIẾNG ANH ---
-      {
-        id: 'EN12_MH2_Q1', subject: 'Tiếng Anh', grade: '12',
-        topic: 'Đề 3 (Chuẩn Đề Minh Họa Lần 2): Meet & Seat & Humanoid Robots',
-        type: 'mcq',
-        question: '[Advertisement: MAKING FRIENDS IN THE SKY] "Who will I sit next to? Will they be interesting or will they be really _______?"',
-        options: ['boring', 'bored', 'boringly', 'boredom'],
-        correct: 0,
-        explanation: 'Đáp án A (boring). Tính từ đuôi -ing mô tả tính chất của người ngồi cạnh (gây nhàm chán), song song với tính từ "interesting".'
-      },
-      {
-        id: 'EN12_MH2_Q2', subject: 'Tiếng Anh', grade: '12',
-        topic: 'Đề 3 (Chuẩn Đề Minh Họa Lần 2): Meet & Seat & Humanoid Robots',
-        type: 'mcq',
-        question: '[Advertisement: MAKING FRIENDS IN THE SKY] "Are these the questions that you often ask yourself before a _______?"',
-        options: ['long journey plane', 'long plane journey', 'plane long journey', 'journey long plane'],
-        correct: 1,
-        explanation: 'Đáp án B (long plane journey). Cụm danh từ chuẩn: Tính từ (long) + danh từ phụ (plane) + danh từ chính (journey).'
-      },
-      {
-        id: 'EN12_MH2_Q8', subject: 'Tiếng Anh', grade: '12',
-        topic: 'Đề 3 (Chuẩn Đề Minh Họa Lần 2): Meet & Seat & Humanoid Robots',
-        type: 'mcq',
-        question: '[Leaflet: To Save the Planet, Begin at Home!] "Meanwhile, we _______ 80 million cans each day and 45,000 tonnes of plastic packaging each year."',
-        options: ['throw away', 'give in', 'pass out', 'put off'],
-        correct: 0,
-        explanation: 'Đáp án A (throw away = vứt bỏ). Phù hợp với ngữ cảnh rác thải lon và bao bì nhựa hằng ngày.'
-      },
-      {
-        id: 'EN12_MH2_Q18', subject: 'Tiếng Anh', grade: '12',
-        topic: 'Đề 3 (Chuẩn Đề Minh Họa Lần 2): Meet & Seat & Humanoid Robots',
-        type: 'mcq',
-        question: '[Reading: Humanoid Robots] "Humanoid robots, eminent characters in science fiction novels and sci-fi films, are becoming a reality. Sophia, as an example, _______."',
-        options: [
-          'of which the activation was launched on Valentine\'s Day, 2016',
-          'was first activated on Valentine\'s Day in 2016',
-          'that had her first Valentine\'s activation launched in 2016',
-          'having been initially activated on Valentine\'s Day, 2016'
-        ],
-        correct: 1,
-        explanation: 'Đáp án B (was first activated on Valentine\'s Day in 2016). Câu thiếu vị ngữ chính chia ở thì quá khứ đơn bị động cho chủ ngữ "Sophia".'
-      },
-      {
-        id: 'EN12_MH2_Q24', subject: 'Tiếng Anh', grade: '12',
-        topic: 'Đề 3 (Chuẩn Đề Minh Họa Lần 2): Meet & Seat & Humanoid Robots',
-        type: 'mcq',
-        question: '[Reading: Endangered Languages] "In fact, 230 languages became extinct between 1950 and 2010." — The word "extinct" is OPPOSITE in meaning to _______.',
-        options: ['existent', 'native', 'official', 'ancient'],
-        correct: 0,
-        explanation: 'Đáp án A (existent = đang tồn tại). Trái nghĩa với "extinct" (tuyệt chủng / biến mất hoàn toàn).'
-      },
-      {
-        id: 'EN12_MH2_Q40', subject: 'Tiếng Anh', grade: '12',
-        topic: 'Đề 3 (Chuẩn Đề Minh Họa Lần 2): Meet & Seat & Humanoid Robots',
-        type: 'mcq',
-        question: '[Reading: Global Urbanisation] Which of the following best summarises the passage about rural migration and urbanisation?',
-        options: [
-          'Driven by limited rural prospects and the appeal of urban opportunities, rural migration fuels rapid urbanisation, impacting the environment and urban resources, thus requiring careful planning for sustainable development.',
-          'Lack of rural opportunities and the attraction of city life cause increased rural migration, significantly expanding urban populations and creating insoluble social and environmental issues.',
-          'Global urbanisation accelerates as people relocate from rural areas to cities seeking improved employment and living standards, but this migration leads to pressing issues like deforestation.',
-          'Limited opportunities in rural areas and the promise of better employment and recreation draw people to cities, but rapid urban growth damages the environment.'
-        ],
-        correct: 0,
-        explanation: 'Đáp án A bao quát đầy đủ cả 4 đoạn: nguyên nhân đẩy/kéo (đoạn 2), hệ quả môi trường & hạ tầng (đoạn 3), và giải pháp quy hoạch phát triển bền vững (đoạn 4).'
-      }
-    ];
-
-    function buildCompleteQuestionBank() {
-      const bank = [...ENGLISH_EXAMS_SEED];
-
-      // Tạo thêm các câu hỏi mở rộng cho Đề 1, 2, 3, 4, 5 môn Tiếng Anh (100% MCQ)
-      const engTopics12 = SUBJECT_GRADE_TOPICS['Tiếng Anh']['12'];
-      engTopics12.forEach((topic, tIdx) => {
-        const existingCount = bank.filter(q => q.topic === topic).length;
-        for (let i = existingCount + 1; i <= 12; i++) {
-          bank.push({
-            id: `EN12_D${tIdx + 1}_EXT_${i}`,
-            subject: 'Tiếng Anh',
-            grade: '12',
-            topic,
-            type: 'mcq',
-            question: `[${topic.split(':')[0]} - Question ${i}] Choose the best option (A, B, C, or D) that fits the context of sustainable development, digital transformation, and modern communication.`,
-            options: [
-              `Option A: Grammatically accurate and contextually appropriate structure #${i}`,
-              `Option B: Incorrect tense or passive/active participle form`,
-              `Option C: Mismatched collocation or phrasal verb usage`,
-              `Option D: Inappropriate linking word or relative pronoun`
-            ],
-            correct: 0,
-            explanation: `Đáp án A chuẩn xác theo cấu trúc đề thi Tốt nghiệp THPT môn Tiếng Anh (100% trắc nghiệm MCQ).`
-          });
-        }
-      });
-
-      // Tiếng Anh lớp 10 & 11 (100% MCQ)
-      ['10', '11'].forEach(gr => {
-        SUBJECT_GRADE_TOPICS['Tiếng Anh'][gr].forEach((topic, tIdx) => {
-          for (let i = 1; i <= 10; i++) {
-            bank.push({
-              id: `EN${gr}_D${tIdx + 1}_Q${i}`,
-              subject: 'Tiếng Anh',
-              grade: gr,
-              topic,
-              type: 'mcq',
-              question: `[English ${gr} - ${topic}] Question ${i}: Select the best answer (A, B, C, or D) to complete the sentence/passage according to the 2025+ exam format.`,
-              options: [
-                `Option A: Correct grammatical and lexical choice for Grade ${gr}`,
-                `Option B: Distractor with incorrect verb agreement`,
-                `Option C: Distractor with wrong preposition`,
-                `Option D: Distractor with incorrect word form`
-              ],
-              correct: 0,
-              explanation: `Giải thích chi tiết câu ${i} Tiếng Anh lớp ${gr} (Định dạng MCQ 4 lựa chọn).`
-            });
-          }
-        });
-      });
-
-      // Sinh học & Công nghệ Nông nghiệp (Khối 10, 11, 12 - Đủ 3 dạng MCQ, Đúng/Sai, Trả lời ngắn)
-      ['Sinh học', 'Công nghệ Nông nghiệp'].forEach(subject => {
-        ['10', '11', '12'].forEach(grade => {
-          SUBJECT_GRADE_TOPICS[subject][grade].forEach((topic, tIdx) => {
-            // 8 câu MCQ
-            for (let i = 1; i <= 8; i++) {
+    function buildInitialQuestions() {
+      const bank = [];
+      Object.entries(SUBJECT_GRADE_TOPICS).forEach(([subject, gradesObj]) => {
+        Object.entries(gradesObj).forEach(([grade, topicsList]) => {
+          topicsList.forEach((topic, tIdx) => {
+            for (let i = 1; i <= 5; i++) {
               bank.push({
-                id: `${subject.slice(0, 2).toUpperCase()}${grade}_T${tIdx + 1}_MCQ_${i}`,
+                id: `${subject.slice(0, 3).toUpperCase()}_${grade}_T${tIdx + 1}_Q${i}`,
                 subject,
                 grade,
                 topic,
                 type: 'mcq',
-                question: `[${subject} ${grade} - ${topic}] Câu ${i}: Nội dung nào sau đây phản ánh đúng bản chất khoa học của chuyên đề ${topic} theo chương trình GDPT 2018?`,
-                options: [
-                  `Đặc điểm chuẩn xác theo SGK Kết nối tri thức (${subject} lớp ${grade})`,
-                  `Nhận định sai lệch về cơ chế điều hòa tự nhiên`,
-                  `Quá trình diễn ra độc lập hoàn toàn với môi trường`,
-                  `Kết quả chỉ đúng khi không có xúc tác sinh học`
-                ],
-                correct: 0,
-                explanation: `Hướng dẫn giải câu ${i}: Dựa trên kiến thức trọng tâm ${subject} lớp ${grade} - Chủ đề ${topic}.`
-              });
-            }
-            // 2 câu Đúng/Sai 4 ý
-            for (let i = 1; i <= 2; i++) {
-              bank.push({
-                id: `${subject.slice(0, 2).toUpperCase()}${grade}_T${tIdx + 1}_TF_${i}`,
-                subject,
-                grade,
-                topic,
-                type: 'tf',
-                question: `[${subject} ${grade} - ${topic}] Câu Đúng/Sai ${i}: Xét các nhận định thực tiễn sau về ${topic}:`,
-                items: [
-                  { id: 'a', statement: `a) Quy trình tuân thủ đúng nguyên lý khoa học của ${topic}.`, correct: true },
-                  { id: 'b', statement: `b) Yếu tố ngoại cảnh không có bất kỳ tác động nào đến kết quả.`, correct: false },
-                  { id: 'c', statement: `c) Ứng dụng công nghệ giúp nâng cao hiệu quả và tính bền vững.`, correct: true },
-                  { id: 'd', statement: `d) Không cần kiểm soát các thông số kỹ thuật trong thực tế.`, correct: false }
-                ],
-                explanation: `Phân tích từng mệnh đề a, b, c, d dựa theo chuẩn kiến thức ${subject} ${grade}.`
-              });
-            }
-            // 2 câu Trả lời ngắn
-            for (let i = 1; i <= 2; i++) {
-              const ans = String(i * 120);
-              bank.push({
-                id: `${subject.slice(0, 2).toUpperCase()}${grade}_T${tIdx + 1}_SA_${i}`,
-                subject,
-                grade,
-                topic,
-                type: 'sa',
-                question: `[${subject} ${grade} - ${topic}] Câu trả lời ngắn ${i}: Cho hệ thống nghiên cứu có chỉ số ban đầu bằng ${i * 60}. Tính giá trị sau 1 chu kỳ nhân đôi (nhập số nguyên)?`,
-                correctAnswer: ans,
-                explanation: `Áp dụng công thức nhân đôi: ${i * 60} × 2 = ${ans}.`
+                question: subject === 'Tiếng Anh'
+                  ? `[${topic}] Question ${i}: Choose the best option to complete the sentence or passage according to the 2025+ exam format.`
+                  : `[${subject} ${grade} - ${topic}] Nhận định nào sau đây là chính xác khi nghiên cứu về ${topic} (mẫu số ${i})?`,
+                options: subject === 'Tiếng Anh'
+                  ? ['Option A (Context-appropriate choice)', 'Option B (Alternative structure)', 'Option C (Correct grammatical/lexical form)', 'Option D (Distractor item)']
+                  : [
+                      `Đặc điểm đúng chuẩn chương trình GDPT 2018 (${subject} lớp ${grade})`,
+                      `Phát biểu chưa chính xác về cơ chế vận hành`,
+                      `Quá trình diễn ra độc lập không chịu tác động môi trường`,
+                      `Chỉ xuất hiện trong điều kiện phòng thí nghiệm`
+                    ],
+                correct: subject === 'Tiếng Anh' ? 2 : 0,
+                explanation: `Hướng dẫn giải chi tiết cho ${subject} lớp ${grade} - ${topic}.`
               });
             }
           });
         });
       });
-
       return bank;
     }
 
-    const INITIAL_QUESTIONS = buildCompleteQuestionBank();
-
-    // =========================================================================
-    // 4. ỨNG DỤNG CHÍNH: BIOMASTER THPT
-    // =========================================================================
     function App() {
       const [activeTab, setActiveTab] = useState('quiz');
-      const [questions, setQuestions] = useState(INITIAL_QUESTIONS);
+      const [questions, setQuestions] = useState(() => buildInitialQuestions());
+      const [customExams, setCustomExams] = useState([]);
       const [topicsMap, setTopicsMap] = useState(SUBJECT_GRADE_TOPICS);
-
-      const [selectedSubject, setSelectedSubject] = useState('Tiếng Anh');
+      const [selectedSubject, setSelectedSubject] = useState('Sinh học');
       const [selectedGrade, setSelectedGrade] = useState('12');
-
-      const [studentSubmissions, setStudentSubmissions] = useState([]);
-      const [isTeacherAuthenticated, setIsTeacherAuthenticated] = useState(false);
-      const [teacherPin, setTeacherPin] = useState('123456');
-
+      const [isTeacherAuth, setIsTeacherAuth] = useState(false);
+      const [teacherPin] = useState('123456');
+      const [submissions, setSubmissions] = useState([]);
       const [toastMsg, setToastMsg] = useState('');
+
       const showToast = useCallback((msg) => {
         setToastMsg(msg);
-        setTimeout(() => setToastMsg(''), 4000);
-      }, []);
-
-      const [showShareModal, setShowShareModal] = useState(false);
-      const [copiedLink, setCopiedLink] = useState(false);
-      const [customAppUrl, setCustomAppUrl] = useState(
-        typeof window !== 'undefined' && window.location.href.startsWith('http')
-          ? window.location.href
-          : 'https://biomaster-thpt.github.io'
-      );
-
-      const handleCopyLink = () => {
-        try {
-          const el = document.createElement('textarea');
-          el.value = customAppUrl;
-          document.body.appendChild(el);
-          el.select();
-          document.execCommand('copy');
-          document.body.removeChild(el);
-          setCopiedLink(true);
-          setTimeout(() => setCopiedLink(false), 2500);
-        } catch (e) {}
-      };
-
-      const handleAddTopic = useCallback((subj, gr, newTopicName) => {
-        if (!newTopicName) return;
-        setTopicsMap(prev => {
-          const existing = prev[subj]?.[gr] || [];
-          if (existing.includes(newTopicName)) return prev;
-          return {
-            ...prev,
-            [subj]: {
-              ...(prev[subj] || {}),
-              [gr]: [...existing, newTopicName]
-            }
-          };
-        });
+        setTimeout(() => setToastMsg(''), 3500);
       }, []);
 
       return (
-        <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col print:bg-white print:text-black">
+        <div className="min-h-screen flex flex-col bg-slate-50 text-slate-800">
           {toastMsg && (
-            <div className="fixed bottom-5 right-5 z-50 bg-slate-900 text-white px-4 py-3 rounded-xl shadow-2xl border border-emerald-500 text-xs font-bold flex items-center gap-2">
-              <span className="text-amber-300 text-base">✨</span>
-              <span>{toastMsg}</span>
+            <div className="fixed bottom-4 right-4 z-50 bg-slate-900 text-white px-4 py-2.5 rounded-xl shadow-lg border border-emerald-500 text-xs font-bold">
+              {toastMsg}
             </div>
           )}
 
-          {/* HEADER */}
-          <header className="bg-emerald-700 text-white shadow-md sticky top-0 z-40 print:hidden">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center space-x-3">
-                <div className="bg-white/15 p-2 rounded-xl border border-white/25 flex items-center justify-center">
-                  <span className="text-xl">🧬</span>
-                </div>
-                <div>
-                  <h1 className="text-lg sm:text-xl font-extrabold tracking-tight flex items-center gap-2">
-                    <span>BioMaster THPT</span>
-                    <span className="bg-emerald-900 text-emerald-200 text-[10px] font-mono px-2 py-0.5 rounded-full">v4.0 Full</span>
-                  </h1>
-                  <p className="text-xs text-emerald-100">Biên soạn &amp; Quản lý: <b>Thầy Trương Trung Can</b></p>
-                </div>
+          <header className="bg-emerald-700 text-white shadow sticky top-0 z-40 print:hidden">
+            <div className="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h1 className="text-lg font-bold">BioMaster THPT <span className="text-xs bg-emerald-800 px-2 py-0.5 rounded-full font-mono">v4.1</span></h1>
+                <p className="text-[11px] text-emerald-200">Biên soạn: <b>Thầy Trương Trung Can</b></p>
               </div>
-
-              <div className="flex flex-wrap items-center gap-2">
+              <nav className="flex flex-wrap gap-1.5 text-xs font-bold">
                 <button
-                  onClick={() => setShowShareModal(true)}
-                  className="bg-amber-400 hover:bg-amber-500 text-slate-900 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 shadow"
+                  onClick={() => setActiveTab('quiz')}
+                  className={`px-3 py-1.5 rounded-lg transition ${activeTab === 'quiz' ? 'bg-white text-emerald-800 shadow' : 'hover:bg-emerald-600 text-white'}`}
                 >
-                  <span>🔗 Link &amp; QR</span>
+                  Luyện Trắc Nghiệm
                 </button>
-
-                <nav className="flex flex-wrap gap-1 sm:gap-2">
-                  {[
-                    { id: 'quiz', label: '📝 Luyện Trắc Nghiệm' },
-                    { id: 'teacher', label: '👨‍🏫 Góc Giáo Viên' },
-                    { id: 'exporter', label: '🖨️ Xuất Đề PDF' }
-                  ].map(tab => (
-                    <button
-                      key={tab.id}
-                      onClick={() => setActiveTab(tab.id)}
-                      className={
-                        activeTab === tab.id
-                          ? 'px-3 py-1.5 rounded-lg text-xs sm:text-sm font-bold bg-white text-emerald-800 shadow'
-                          : 'px-3 py-1.5 rounded-lg text-xs sm:text-sm font-semibold hover:bg-emerald-600 text-white'
-                      }
-                    >
-                      {tab.label}
-                    </button>
-                  ))}
-                </nav>
-              </div>
+                <button
+                  onClick={() => setActiveTab('teacher')}
+                  className={`px-3 py-1.5 rounded-lg transition ${activeTab === 'teacher' ? 'bg-white text-emerald-800 shadow' : 'hover:bg-emerald-600 text-white'}`}
+                >
+                  Góc Giáo Viên
+                </button>
+                <button
+                  onClick={() => setActiveTab('exporter')}
+                  className={`px-3 py-1.5 rounded-lg transition ${activeTab === 'exporter' ? 'bg-white text-emerald-800 shadow' : 'hover:bg-emerald-600 text-white'}`}
+                >
+                  Xuất Đề Word / PDF
+                </button>
+              </nav>
             </div>
           </header>
 
-          {/* MODAL CHIA SẺ LINK & QR */}
-          {showShareModal && (
-            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-              <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl relative">
-                <button onClick={() => setShowShareModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-700 font-bold">✕</button>
-                <h3 className="text-lg font-bold text-slate-800">Chia Sẻ Link &amp; Mã QR Truy Cập</h3>
-                <p className="text-xs text-slate-500">Gửi đường dẫn hoặc mã QR bên dưới cho học sinh và giáo viên vào ôn luyện trực tuyến:</p>
-                <div className="space-y-3">
-                  <input
-                    type="text"
-                    value={customAppUrl}
-                    onChange={(e) => setCustomAppUrl(e.target.value)}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-mono"
-                  />
-                  <button onClick={handleCopyLink} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 rounded-xl text-xs font-bold">
-                    {copiedLink ? '✓ Đã sao chép đường link!' : 'Sao Chép Đường Link'}
-                  </button>
-                  <div className="text-center pt-2">
-                    <img
-                      src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(customAppUrl)}`}
-                      alt="QR Code"
-                      className="w-40 h-40 mx-auto rounded-xl border p-1"
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* MAIN CONTENT */}
-          <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 print:p-0 print:max-w-none">
+          <main className="flex-1 max-w-7xl w-full mx-auto px-4 py-6 print:p-0 print:max-w-none">
             {activeTab === 'quiz' && (
-              <QuizSection
+              <QuizView
                 questions={questions}
+                customExams={customExams}
                 topicsMap={topicsMap}
                 selectedSubject={selectedSubject}
                 setSelectedSubject={setSelectedSubject}
                 selectedGrade={selectedGrade}
                 setSelectedGrade={setSelectedGrade}
-                onSaveSubmission={(sub) => setStudentSubmissions(prev => [sub, ...prev])}
+                onSaveSubmission={(sub) => setSubmissions(prev => [sub, ...prev])}
               />
             )}
             {activeTab === 'teacher' && (
-              <TeacherSection
+              <TeacherView
                 questions={questions}
                 setQuestions={setQuestions}
+                customExams={customExams}
+                setCustomExams={setCustomExams}
                 topicsMap={topicsMap}
-                onAddTopic={handleAddTopic}
-                isAuthenticated={isTeacherAuthenticated}
-                setIsAuthenticated={setIsTeacherAuthenticated}
+                setTopicsMap={setTopicsMap}
+                isAuth={isTeacherAuth}
+                setIsAuth={setIsTeacherAuth}
                 teacherPin={teacherPin}
-                setTeacherPin={setTeacherPin}
-                submissions={studentSubmissions}
-                setSubmissions={setStudentSubmissions}
+                submissions={submissions}
+                setSubmissions={setSubmissions}
                 showToast={showToast}
               />
             )}
             {activeTab === 'exporter' && (
-              <ExporterSection
+              <ExporterView
                 questions={questions}
+                customExams={customExams}
                 topicsMap={topicsMap}
                 selectedSubject={selectedSubject}
                 setSelectedSubject={setSelectedSubject}
@@ -934,326 +796,170 @@
             )}
           </main>
 
-          <footer className="bg-slate-800 text-slate-300 py-4 text-center text-xs border-t print:hidden">
-            <p>© 2026 BioMaster THPT - Hệ thống Ôn thi THPT chuẩn GDPT 2018 | Quản lý: <b>Thầy Trương Trung Can</b></p>
+          <footer className="bg-slate-800 text-slate-400 py-3 text-center text-xs print:hidden">
+            © 2026 BioMaster THPT - <b>Thầy Trương Trung Can</b>
           </footer>
         </div>
       );
     }
 
-    // =========================================================================
-    // 5. SECTION HỌC SINH: LUYỆN TRẮC NGHIỆM & NỘP BÀI THỐNG KÊ
-    // =========================================================================
-    function QuizSection({ questions, topicsMap, selectedSubject, setSelectedSubject, selectedGrade, setSelectedGrade, onSaveSubmission }) {
+    function QuizView({ questions, customExams, topicsMap, selectedSubject, setSelectedSubject, selectedGrade, setSelectedGrade, onSaveSubmission }) {
       const [selectedTopic, setSelectedTopic] = useState('Tất cả');
-      const [mode, setMode] = useState('practice');
+      const [selectedCustomExamId, setSelectedCustomExamId] = useState('');
       const [studentName, setStudentName] = useState('');
       const [studentClass, setStudentClass] = useState('');
-      const [errorMsg, setErrorMsg] = useState('');
-
-      const [quizStarted, setQuizStarted] = useState(false);
+      const [started, setStarted] = useState(false);
       const [currentIdx, setCurrentIdx] = useState(0);
-      const [userAnswers, setUserAnswers] = useState({});
-      const [isSubmitted, setIsSubmitted] = useState(false);
-      const [activeQuestions, setActiveQuestions] = useState([]);
-      const [timeLeft, setTimeLeft] = useState(50 * 60);
+      const [answers, setAnswers] = useState({});
+      const [submitted, setSubmitted] = useState(false);
+      const [activeList, setActiveList] = useState([]);
 
-      const availableTopics = useMemo(
-        () => ['Tất cả', ...(topicsMap[selectedSubject]?.[selectedGrade] || [])],
-        [topicsMap, selectedSubject, selectedGrade]
+      const topics = useMemo(() => ['Tất cả', ...(topicsMap[selectedSubject]?.[selectedGrade] || [])], [topicsMap, selectedSubject, selectedGrade]);
+      const matchingCustomExams = useMemo(
+        () => (customExams || []).filter(ex => ex.subject === selectedSubject && ex.grade === selectedGrade),
+        [customExams, selectedSubject, selectedGrade]
       );
-
-      const filteredQuestions = useMemo(() => {
-        return questions.filter(q => {
-          if (!q || q.subject !== selectedSubject || q.grade !== selectedGrade) return false;
-          // Riêng môn Tiếng Anh chỉ lấy dạng MCQ
-          if (selectedSubject === 'Tiếng Anh' && q.type !== 'mcq') return false;
-          if (selectedTopic !== 'Tất cả' && q.topic !== selectedTopic) return false;
-          return true;
-        });
-      }, [questions, selectedSubject, selectedGrade, selectedTopic]);
-
-      const calculateScore = useCallback(() => {
-        let correct = 0;
-        activeQuestions.forEach((q, idx) => {
-          const ans = userAnswers[idx];
-          if (q.type === 'mcq' && ans === q.correct) correct++;
-          else if (q.type === 'tf' && ans && Array.isArray(q.items)) {
-            if (q.items.every(it => ans[it.id] === it.correct)) correct++;
-          } else if (q.type === 'sa' && ans !== undefined && String(ans).trim() === String(q.correctAnswer).trim()) {
-            correct++;
-          }
-        });
-        return correct;
-      }, [activeQuestions, userAnswers]);
-
-      const handleSubmit = useCallback(() => {
-        setIsSubmitted(true);
-        const score = calculateScore();
-        const total = activeQuestions.length || 1;
-        onSaveSubmission({
-          id: Date.now(),
-          name: studentName.trim() || 'Học sinh',
-          className: studentClass.trim() || `Lớp ${selectedGrade}`,
-          subject: selectedSubject,
-          grade: selectedGrade,
-          topic: selectedTopic,
-          mode: mode === 'practice' ? 'Tự luyện' : 'Thi tính giờ (50p)',
-          score,
-          total: activeQuestions.length,
-          score10: ((score / total) * 10).toFixed(2),
-          percentage: Math.round((score / total) * 100),
-          submittedAt: new Date().toLocaleString('vi-VN')
-        });
-      }, [calculateScore, activeQuestions.length, onSaveSubmission, studentName, studentClass, selectedGrade, selectedSubject, selectedTopic, mode]);
-
-      useEffect(() => {
-        let timer;
-        if (quizStarted && mode === 'timed' && !isSubmitted && timeLeft > 0) {
-          timer = setInterval(() => {
-            setTimeLeft(prev => {
-              if (prev <= 1) {
-                clearInterval(timer);
-                handleSubmit();
-                return 0;
-              }
-              return prev - 1;
-            });
-          }, 1000);
+      const filtered = useMemo(() => {
+        if (selectedCustomExamId) {
+          const foundExam = (customExams || []).find(ex => String(ex.id) === String(selectedCustomExamId));
+          return foundExam ? foundExam.questions : [];
         }
-        return () => clearInterval(timer);
-      }, [quizStarted, mode, isSubmitted, timeLeft, handleSubmit]);
+        return questions.filter(q =>
+          q.subject === selectedSubject &&
+          q.grade === selectedGrade &&
+          (selectedSubject !== 'Tiếng Anh' || q.type === 'mcq') &&
+          (selectedTopic === 'Tất cả' || q.topic === selectedTopic)
+        );
+      }, [questions, customExams, selectedCustomExamId, selectedSubject, selectedGrade, selectedTopic]);
 
-      if (!quizStarted) {
+      const score = useMemo(() => activeList.reduce((acc, q, i) => (q.type === 'mcq' && answers[i] === q.correct ? acc + 1 : acc), 0), [activeList, answers]);
+
+      if (!started) {
         return (
-          <div className="max-w-3xl mx-auto bg-white p-6 sm:p-8 rounded-2xl shadow-sm border border-slate-200 space-y-5">
-            <div className="text-center">
-              <h2 className="text-2xl font-extrabold text-slate-800">Luyện Thi Trắc Nghiệm THPT (GDPT 2018)</h2>
-              <p className="text-xs text-emerald-700 font-semibold mt-1">Chọn Khối, Môn học và Đề thi / Chủ đề để bắt đầu ôn luyện</p>
+          <div className="max-w-2xl mx-auto bg-white p-6 rounded-2xl border shadow-sm space-y-4">
+            <h2 className="text-xl font-bold text-center text-slate-800">Luyện Tập Trắc Nghiệm THPT</h2>
+            <div className="grid grid-cols-3 gap-2">
+              {['10', '11', '12'].map(g => (
+                <button key={g} onClick={() => { setSelectedGrade(g); setSelectedTopic('Tất cả'); setSelectedCustomExamId(''); }} className={`p-2.5 rounded-xl text-xs font-bold ${selectedGrade === g ? 'bg-emerald-600 text-white' : 'bg-slate-100'}`}>Khối {g}</button>
+              ))}
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              {['Sinh học', 'Công nghệ Nông nghiệp', 'Tiếng Anh'].map(s => (
+                <button key={s} onClick={() => { setSelectedSubject(s); setSelectedTopic('Tất cả'); setSelectedCustomExamId(''); }} className={`p-2.5 rounded-xl text-xs font-bold ${selectedSubject === s ? 'bg-emerald-600 text-white' : 'bg-slate-100'}`}>{s}</button>
+              ))}
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <input type="text" placeholder="Họ và tên học sinh..." value={studentName} onChange={e => setStudentName(e.target.value)} className="p-2.5 border rounded-xl text-xs" />
+              <input type="text" placeholder="Lớp (VD: 12A1)..." value={studentClass} onChange={e => setStudentClass(e.target.value)} className="p-2.5 border rounded-xl text-xs" />
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-emerald-50/70 p-4 rounded-xl border border-emerald-200">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Họ và Tên Học Sinh (*):</label>
-                <input
-                  type="text"
-                  value={studentName}
-                  onChange={e => { setStudentName(e.target.value); setErrorMsg(''); }}
-                  placeholder="Ví dụ: Nguyễn Văn An..."
-                  className="w-full p-2.5 border border-slate-300 rounded-xl text-xs bg-white"
-                />
+            {matchingCustomExams.length > 0 && (
+              <div className="p-3 bg-indigo-50/70 border border-indigo-200 rounded-xl space-y-1.5">
+                <label className="block text-[11px] font-bold text-indigo-800 uppercase">📁 Làm Đề Riêng Của Giáo Viên (Tách biệt ngân hàng):</label>
+                <select
+                  value={selectedCustomExamId}
+                  onChange={e => setSelectedCustomExamId(e.target.value)}
+                  className="w-full p-2 border border-indigo-300 rounded-lg text-xs bg-white font-semibold text-indigo-900"
+                >
+                  <option value="">-- Không chọn (Luyện theo chuyên đề ngân hàng có sẵn) --</option>
+                  {matchingCustomExams.map(ex => (
+                    <option key={ex.id} value={ex.id}>
+                      [Mã {ex.examCode}] {ex.title} ({ex.questions.length} câu)
+                    </option>
+                  ))}
+                </select>
               </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Lớp:</label>
-                <input
-                  type="text"
-                  value={studentClass}
-                  onChange={e => setStudentClass(e.target.value)}
-                  placeholder="Ví dụ: 12A1..."
-                  className="w-full p-2.5 border border-slate-300 rounded-xl text-xs bg-white"
-                />
-              </div>
-              {errorMsg && <p className="sm:col-span-2 text-xs text-rose-600 font-bold">{errorMsg}</p>}
-            </div>
+            )}
 
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1.5">1. Chọn Khối Lớp:</label>
-              <div className="grid grid-cols-3 gap-2">
-                {['10', '11', '12'].map(gr => (
-                  <button
-                    key={gr}
-                    onClick={() => { setSelectedGrade(gr); setSelectedTopic('Tất cả'); }}
-                    className={`p-3 rounded-xl font-bold text-xs border transition ${selectedGrade === gr ? 'bg-emerald-600 text-white border-emerald-600 shadow' : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'}`}
-                  >
-                    Khối {gr}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1.5">2. Chọn Môn Học:</label>
-              <div className="grid grid-cols-3 gap-2">
-                {['Tiếng Anh', 'Sinh học', 'Công nghệ Nông nghiệp'].map(sub => (
-                  <button
-                    key={sub}
-                    onClick={() => { setSelectedSubject(sub); setSelectedTopic('Tất cả'); }}
-                    className={`p-3 rounded-xl font-bold text-xs border transition ${selectedSubject === sub ? 'bg-emerald-600 text-white border-emerald-600 shadow' : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'}`}
-                  >
-                    {sub}
-                  </button>
-                ))}
-              </div>
-              {selectedSubject === 'Tiếng Anh' && (
-                <p className="text-[11px] text-indigo-700 font-semibold mt-1">✓ Môn Tiếng Anh áp dụng chuẩn 100% câu hỏi trắc nghiệm MCQ 4 lựa chọn.</p>
-              )}
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1.5">3. Chọn Đề Thi / Chủ Đề Ôn Luyện:</label>
-              <select
-                value={selectedTopic}
-                onChange={e => setSelectedTopic(e.target.value)}
-                className="w-full p-3 border border-slate-300 rounded-xl text-xs bg-white font-medium"
-              >
-                {availableTopics.map(t => <option key={t} value={t}>{t}</option>)}
+            {!selectedCustomExamId && (
+              <select value={selectedTopic} onChange={e => setSelectedTopic(e.target.value)} className="w-full p-2.5 border rounded-xl text-xs bg-white">
+                {topics.map(t => <option key={t} value={t}>{t}</option>)}
               </select>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <button
-                onClick={() => setMode('practice')}
-                className={`p-3 rounded-xl border text-left text-xs ${mode === 'practice' ? 'border-emerald-600 bg-emerald-50 font-bold text-emerald-900' : 'border-slate-200'}`}
-              >
-                ✨ <b>Tự Luyện:</b> Xem đáp án &amp; giải thích ngay từng câu
-              </button>
-              <button
-                onClick={() => setMode('timed')}
-                className={`p-3 rounded-xl border text-left text-xs ${mode === 'timed' ? 'border-emerald-600 bg-emerald-50 font-bold text-emerald-900' : 'border-slate-200'}`}
-              >
-                ⏱️ <b>Thi Tính Giờ (50 phút):</b> Nộp bài mới chấm điểm
-              </button>
-            </div>
-
+            )}
             <button
               onClick={() => {
-                if (!studentName.trim()) {
-                  setErrorMsg('Vui lòng nhập Họ và Tên học sinh trước khi làm bài!');
-                  return;
-                }
-                setActiveQuestions(filteredQuestions);
-                setQuizStarted(true);
+                if (!studentName.trim() || filtered.length === 0) return;
+                setActiveList(filtered);
+                setAnswers({});
+                setSubmitted(false);
                 setCurrentIdx(0);
-                setUserAnswers({});
-                setIsSubmitted(false);
-                setTimeLeft(50 * 60);
+                setStarted(true);
               }}
-              disabled={filteredQuestions.length === 0}
-              className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-3.5 rounded-xl font-bold text-sm shadow-md disabled:opacity-50"
+              disabled={!studentName.trim() || filtered.length === 0}
+              className="w-full py-3 bg-emerald-600 text-white rounded-xl font-bold text-sm disabled:opacity-50"
             >
-              Bắt Đầu Làm Bài ({filteredQuestions.length} câu)
+              Bắt Đầu Làm Bài ({filtered.length} câu)
             </button>
           </div>
         );
       }
 
-      const currentQ = activeQuestions[currentIdx];
-      const hasAnswered = userAnswers[currentIdx] !== undefined && userAnswers[currentIdx] !== '';
-      const showImmediate = (mode === 'practice' && hasAnswered) || isSubmitted;
-
+      const cur = activeList[currentIdx];
+      const qLabel = selectedSubject === 'Tiếng Anh' ? `Question ${currentIdx + 1}` : `Câu ${currentIdx + 1}`;
       return (
-        <div className="max-w-4xl mx-auto space-y-5">
-          <div className="bg-white p-4 rounded-xl border border-slate-200 flex flex-wrap justify-between items-center gap-3 text-xs font-bold">
-            <button onClick={() => setQuizStarted(false)} className="bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg text-slate-700">← Đổi Đề</button>
-            <span>HS: <b className="text-emerald-700">{studentName}</b> | Câu {currentIdx + 1} / {activeQuestions.length}</span>
-            {mode === 'timed' && !isSubmitted && (
-              <span className="bg-amber-100 text-amber-800 px-3 py-1 rounded-lg font-mono">
-                ⏱ {Math.floor(timeLeft / 60).toString().padStart(2, '0')}:{(timeLeft % 60).toString().padStart(2, '0')}
-              </span>
-            )}
-            {!isSubmitted && (
-              <button onClick={handleSubmit} className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-1.5 rounded-lg shadow">Nộp Bài &amp; Lưu Điểm</button>
+        <div className="max-w-3xl mx-auto space-y-4">
+          <div className="bg-white p-3.5 rounded-xl border flex justify-between items-center text-xs font-bold">
+            <button onClick={() => setStarted(false)} className="text-slate-500">← Thoát</button>
+            <span>{studentName} | {qLabel}/{activeList.length}</span>
+            {!submitted && (
+              <button
+                onClick={() => {
+                  setSubmitted(true);
+                  onSaveSubmission({
+                    id: Date.now(),
+                    name: studentName.trim(),
+                    className: studentClass.trim() || `Khối ${selectedGrade}`,
+                    subject: selectedSubject,
+                    topic: selectedCustomExamId
+                      ? (matchingCustomExams.find(ex => String(ex.id) === String(selectedCustomExamId))?.title || 'Đề riêng giáo viên')
+                      : selectedTopic,
+                    score,
+                    total: activeList.length,
+                    submittedAt: new Date().toLocaleString('vi-VN')
+                  });
+                }}
+                className="bg-emerald-600 text-white px-3 py-1.5 rounded-lg"
+              >
+                Nộp Bài
+              </button>
             )}
           </div>
 
-          {isSubmitted && (
-            <div className="bg-emerald-50 border border-emerald-300 p-6 rounded-2xl text-center space-y-2">
-              <h3 className="text-lg font-extrabold text-emerald-900">ĐÃ NỘP BÀI &amp; GỬI KẾT QUẢ CHO GIÁO VIÊN</h3>
-              <p className="text-3xl font-black text-emerald-700">
-                {calculateScore()} / {activeQuestions.length} câu ({((calculateScore() / (activeQuestions.length || 1)) * 10).toFixed(2)} điểm)
-              </p>
+          {submitted && (
+            <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-xl text-center">
+              <p className="text-lg font-extrabold text-emerald-800">Kết quả: {score} / {activeList.length} câu đúng</p>
             </div>
           )}
 
-          {currentQ && (
-            <div className="bg-white p-6 rounded-2xl border border-slate-200 space-y-4 shadow-sm">
-              <div className="flex justify-between items-center text-[11px] text-slate-400">
-                <span className="bg-emerald-50 text-emerald-700 font-bold px-2.5 py-1 rounded">{currentQ.topic}</span>
-                <span>{currentQ.type === 'mcq' ? 'Trắc nghiệm MCQ' : currentQ.type === 'tf' ? 'Đúng / Sai 4 ý' : 'Trả lời ngắn'}</span>
+          {cur && (
+            <div className="bg-white p-6 rounded-2xl border space-y-4">
+              <h3 className="font-bold text-sm leading-relaxed">{qLabel}: {cur.question}</h3>
+              {cur.richHtml && <div className="text-xs overflow-x-auto" dangerouslySetInnerHTML={{ __html: cur.richHtml }} />}
+              {cur.pageImage && <img src={cur.pageImage} alt="Minh họa" className="max-h-64 rounded-lg border mx-auto" />}
+              <div className="space-y-2">
+                {(cur.options || []).map((opt, oi) => {
+                  const picked = answers[currentIdx] === oi;
+                  const right = cur.correct === oi;
+                  let cls = 'border-slate-200';
+                  if (submitted) {
+                    if (right) cls = 'border-emerald-500 bg-emerald-50 font-bold text-emerald-900';
+                    else if (picked) cls = 'border-rose-500 bg-rose-50 text-rose-900';
+                  } else if (picked) {
+                    cls = 'border-emerald-600 bg-emerald-50 font-semibold';
+                  }
+                  return (
+                    <button key={oi} onClick={() => !submitted && setAnswers(p => ({ ...p, [currentIdx]: oi }))} className={`w-full p-3 border rounded-xl text-left text-xs ${cls}`}>
+                      <b>{String.fromCharCode(65 + oi)}.</b> {opt}
+                    </button>
+                  );
+                })}
               </div>
-
-              <h3 className="font-bold text-sm sm:text-base text-slate-800 whitespace-pre-line leading-relaxed">{currentQ.question}</h3>
-
-              {/* DẠNG MCQ */}
-              {currentQ.type === 'mcq' && Array.isArray(currentQ.options) && (
-                <div className="space-y-2.5">
-                  {currentQ.options.map((opt, oIdx) => {
-                    const isSelected = userAnswers[currentIdx] === oIdx;
-                    const isCorrect = currentQ.correct === oIdx;
-                    let cls = 'border-slate-200 hover:border-emerald-400';
-                    if (showImmediate) {
-                      if (isCorrect) cls = 'border-emerald-500 bg-emerald-50 text-emerald-900 font-bold';
-                      else if (isSelected) cls = 'border-rose-500 bg-rose-50 text-rose-900';
-                    } else if (isSelected) {
-                      cls = 'border-emerald-600 bg-emerald-50 font-semibold';
-                    }
-                    return (
-                      <button
-                        key={oIdx}
-                        onClick={() => !isSubmitted && setUserAnswers(prev => ({ ...prev, [currentIdx]: oIdx }))}
-                        className={`w-full p-3.5 border rounded-xl text-left text-xs sm:text-sm transition flex items-start gap-2.5 ${cls}`}
-                      >
-                        <span className="font-bold">{String.fromCharCode(65 + oIdx)}.</span>
-                        <span className="flex-1">{opt}</span>
-                      </button>
-                    );
-                  })}
-                </div>
+              {submitted && cur.explanation && (
+                <div className="p-3 bg-slate-50 border rounded-xl text-xs text-slate-700">{cur.explanation}</div>
               )}
-
-              {/* DẠNG ĐÚNG SAI */}
-              {currentQ.type === 'tf' && Array.isArray(currentQ.items) && (
-                <div className="space-y-2">
-                  {currentQ.items.map(it => {
-                    const tfState = userAnswers[currentIdx] || {};
-                    return (
-                      <div key={it.id} className="p-3 bg-slate-50 border rounded-xl flex flex-wrap items-center justify-between gap-2 text-xs">
-                        <span className="flex-1 font-medium">{it.statement}</span>
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            onClick={() => !isSubmitted && setUserAnswers(prev => ({ ...prev, [currentIdx]: { ...(prev[currentIdx] || {}), [it.id]: true } }))}
-                            className={`px-3 py-1 rounded font-bold border ${tfState[it.id] === true ? 'bg-emerald-600 text-white' : 'bg-white'}`}
-                          >Đúng</button>
-                          <button
-                            onClick={() => !isSubmitted && setUserAnswers(prev => ({ ...prev, [currentIdx]: { ...(prev[currentIdx] || {}), [it.id]: false } }))}
-                            className={`px-3 py-1 rounded font-bold border ${tfState[it.id] === false ? 'bg-rose-600 text-white' : 'bg-white'}`}
-                          >Sai</button>
-                          {showImmediate && (
-                            <span className="font-bold text-emerald-700 ml-1">({it.correct ? 'Đúng' : 'Sai'})</span>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-
-              {/* DẠNG TRẢ LỜI NGẮN */}
-              {currentQ.type === 'sa' && (
-                <div className="space-y-2">
-                  <input
-                    type="text"
-                    disabled={isSubmitted}
-                    value={userAnswers[currentIdx] || ''}
-                    onChange={e => setUserAnswers(prev => ({ ...prev, [currentIdx]: e.target.value }))}
-                    placeholder="Nhập đáp án số..."
-                    className="w-full p-3 border rounded-xl text-sm font-mono"
-                  />
-                  {showImmediate && (
-                    <p className="text-xs font-bold text-emerald-700">Đáp án đúng: {currentQ.correctAnswer}</p>
-                  )}
-                </div>
-              )}
-
-              {showImmediate && currentQ.explanation && (
-                <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-900">
-                  <b>💡 Giải thích chi tiết:</b> {currentQ.explanation}
-                </div>
-              )}
-
-              <div className="flex justify-between pt-3 border-t">
-                <button disabled={currentIdx === 0} onClick={() => setCurrentIdx(p => p - 1)} className="px-4 py-2 border rounded-lg text-xs font-bold disabled:opacity-40">← Câu trước</button>
-                <button disabled={currentIdx === activeQuestions.length - 1} onClick={() => setCurrentIdx(p => p + 1)} className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-xs font-bold disabled:opacity-40">Câu tiếp theo →</button>
+              <div className="flex justify-between pt-2 border-t">
+                <button disabled={currentIdx === 0} onClick={() => setCurrentIdx(i => i - 1)} className="px-3 py-1.5 border rounded-lg text-xs disabled:opacity-40">← Trước</button>
+                <button disabled={currentIdx === activeList.length - 1} onClick={() => setCurrentIdx(i => i + 1)} className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-xs disabled:opacity-40">Tiếp →</button>
               </div>
             </div>
           )}
@@ -1261,366 +967,313 @@
       );
     }
 
-    // =========================================================================
-    // 6. SECTION GIÁO VIÊN:
-    //    - XEM & SỬA NHIỀU CÂU HỎI CÙNG LÚC (BATCH EDIT)
-    //    - TẠO ĐỀ TƯƠNG TỰ TỪ FILE PDF / WORD / ĐỀ HIỆN CÓ (KHÔNG CẦN API KEY)
-    //    - XEM & XUẤT KẾT QUẢ LÀM BÀI CỦA HỌC SINH RA EXCEL (.CSV)
-    // =========================================================================
-    function TeacherSection({
-      questions, setQuestions, topicsMap, onAddTopic,
-      isAuthenticated, setIsAuthenticated, teacherPin, setTeacherPin,
-      submissions, setSubmissions, showToast
-    }) {
-      const [subTab, setSubTab] = useState('bank_edit');
+    function TeacherView({ questions, setQuestions, customExams, setCustomExams, isAuth, setIsAuth, teacherPin, submissions, setSubmissions, showToast }) {
       const [pinInput, setPinInput] = useState('');
-      const [pinError, setPinError] = useState('');
+      const [subTab, setSubTab] = useState('upload');
+      const [subj, setSubj] = useState('Tiếng Anh');
+      const [grade, setGrade] = useState('12');
+      const [topicName, setTopicName] = useState('Đề Upload Mới');
+      const [customExamCode, setCustomExamCode] = useState('202');
+      const [uploadStatus, setUploadStatus] = useState('');
+      const [parsedList, setParsedList] = useState([]);
+      const [previewMode, setPreviewMode] = useState(false);
+      const [viewingExamId, setViewingExamId] = useState(null);
 
-      // Bộ lọc Xem & Sửa nhiều câu cùng lúc
-      const [filterSubj, setFilterSubj] = useState('Tiếng Anh');
-      const [filterGrade, setFilterGrade] = useState('12');
-      const [filterTopic, setFilterTopic] = useState('Tất cả');
-      const [searchKeyword, setSearchKeyword] = useState('');
-      const [draftMap, setDraftMap] = useState({});
+      const [editSubj, setEditSubj] = useState('Tiếng Anh');
+      const [editGrade, setEditGrade] = useState('12');
+      const [drafts, setDrafts] = useState({});
 
-      // Upload PDF / DOCX & Tạo đề tương tự (Không cần API key)
-      const [uploadSubj, setUploadSubj] = useState('Tiếng Anh');
-      const [uploadGrade, setUploadGrade] = useState('12');
-      const [uploadTopicName, setUploadTopicName] = useState('Đề Tiếng Anh Tương Tự Mới (Từ File PDF/Word)');
-      const [rawExtractedText, setRawExtractedText] = useState('');
-      const [uploadedFileName, setUploadedFileName] = useState('');
-      const [isReadingFile, setIsReadingFile] = useState(false);
-      const [generateSimilarFlag, setGenerateSimilarFlag] = useState(true);
-      const [previewGeneratedList, setPreviewGeneratedList] = useState([]);
-      const [previewExamCode, setPreviewExamCode] = useState('2026');
-      const [showFullExamModal, setShowFullExamModal] = useState(false);
-      const [subClassFilter, setSubClassFilter] = useState('Tất cả');
-      const [subSubjectFilter, setSubSubjectFilter] = useState('Tất cả');
-
-      if (!isAuthenticated) {
+      if (!isAuth) {
         return (
-          <div className="max-w-md mx-auto my-8 bg-white p-6 sm:p-8 rounded-2xl border border-slate-200 shadow-md text-center space-y-4">
-            <div className="text-4xl">🔐</div>
-            <h2 className="text-xl font-extrabold text-slate-800">Đăng Nhập Góc Giáo Viên</h2>
-            <p className="text-xs text-slate-500">Quản lý ngân hàng đề, tạo đề tương tự từ PDF/Word và xuất bảng điểm học sinh (PIN mặc định: <b>123456</b>)</p>
-            <input
-              type="password"
-              value={pinInput}
-              onChange={e => { setPinInput(e.target.value); setPinError(''); }}
-              onKeyDown={e => {
-                if (e.key === 'Enter') {
-                  if (pinInput === teacherPin) setIsAuthenticated(true);
-                  else setPinError('Sai mã PIN! Mặc định là 123456.');
-                }
-              }}
-              placeholder="Nhập mã PIN..."
-              className="w-full p-3 border rounded-xl text-center font-mono text-lg tracking-widest"
-            />
-            {pinError && <p className="text-xs text-rose-600 font-bold">{pinError}</p>}
-            <button
-              onClick={() => {
-                if (pinInput === teacherPin) setIsAuthenticated(true);
-                else setPinError('Sai mã PIN! Mặc định là 123456.');
-              }}
-              className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-3 rounded-xl font-bold text-xs shadow"
-            >
-              Mở Khóa Quản Trị
-            </button>
+          <div className="max-w-sm mx-auto bg-white p-6 rounded-2xl border shadow-sm text-center space-y-4">
+            <h2 className="font-bold text-base">Xác Thực Giáo Viên</h2>
+            <input type="password" placeholder="Nhập PIN (mặc định: 123456)" value={pinInput} onChange={e => setPinInput(e.target.value)} className="w-full p-2.5 border rounded-xl text-center font-mono text-sm" />
+            <button onClick={() => pinInput === teacherPin && setIsAuth(true)} className="w-full py-2.5 bg-emerald-600 text-white rounded-xl text-xs font-bold">Mở Khóa</button>
           </div>
         );
       }
 
-      const availableTopics = ['Tất cả', ...(topicsMap[filterSubj]?.[filterGrade] || [])];
-      const filteredBankQuestions = questions.filter(q => {
-        if (q.subject !== filterSubj || q.grade !== filterGrade) return false;
-        if (filterSubj === 'Tiếng Anh' && q.type !== 'mcq') return false;
-        if (filterTopic !== 'Tất cả' && q.topic !== filterTopic) return false;
-        if (searchKeyword.trim() && !q.question.toLowerCase().includes(searchKeyword.toLowerCase())) return false;
-        return true;
-      });
-
-      const updateDraft = (q, patch) => {
-        setDraftMap(prev => ({
-          ...prev,
-          [q.id]: { ...(prev[q.id] || q), ...patch }
-        }));
-      };
-
-      const handleSaveAllEdits = () => {
-        const changedIds = Object.keys(draftMap);
-        if (changedIds.length === 0) {
-          showToast('Chưa có thay đổi nào cần lưu.');
-          return;
-        }
-        setQuestions(prev => prev.map(q => {
-          if (!draftMap[q.id]) return q;
-          const updated = draftMap[q.id];
-          // Đảm bảo riêng Tiếng Anh luôn là MCQ
-          if (updated.subject === 'Tiếng Anh') updated.type = 'mcq';
-          return updated;
-        }));
-        setDraftMap({});
-        showToast(`Đã lưu cập nhật cho ${changedIds.length} câu hỏi thành công!`);
-      };
-
-      const handleFileUpload = async (e) => {
+      const handleUploadFile = async (e, mode) => {
         const file = e.target.files?.[0];
         if (!file) return;
-        setIsReadingFile(true);
-        setUploadedFileName(file.name);
-        const lowerName = file.name.toLowerCase();
-        let text = '';
-
-        if (lowerName.endsWith('.pdf')) {
-          text = await extractTextFromPdfFile(file);
-        } else if (lowerName.endsWith('.docx')) {
-          text = await extractTextFromDocxFile(file);
+        setUploadStatus(`Đang đọc & nhận diện đáp án từ tệp "${file.name}"...`);
+        let extracted = { text: '', richBlocks: {}, pageImages: {}, answerHints: {} };
+        if (file.name.toLowerCase().endsWith('.pdf')) {
+          extracted = await extractTextFromPdfFile(file, setUploadStatus);
+        } else if (file.name.toLowerCase().endsWith('.docx')) {
+          extracted = await extractTextFromDocxFile(file);
         } else {
-          text = await file.text();
+          extracted.text = cleanVietnameseUnicode(await file.text());
         }
-
-        setIsReadingFile(false);
-        if (!text.trim()) {
-          showToast('Không trích xuất được chữ (file ảnh scan). Thầy có thể dán văn bản đề vào ô bên dưới.');
-        } else {
-          setRawExtractedText(text);
-          const generated = parseAndGenerateSimilarFromText(text, uploadSubj, uploadGrade, uploadTopicName, generateSimilarFlag);
-          setPreviewGeneratedList(generated);
-          showToast(`Đã đọc file "${file.name}" và tạo ${generated.length} câu hỏi!`);
-        }
+        const generated = parseAndGenerateSimilarFromText(extracted.text, subj, grade, topicName.trim() || file.name, {
+          richBlocks: extracted.richBlocks,
+          pageImages: extracted.pageImages,
+          answerHints: extracted.answerHints,
+          mode
+        });
+        setParsedList(generated);
+        setPreviewMode(true);
+        setUploadStatus(generated.length > 0 ? `Đã xử lý thành công ${generated.length} câu hỏi!` : 'Không tìm thấy cấu trúc câu hỏi chuẩn trong file.');
+        e.target.value = '';
       };
 
-      const handleCloneSelectedTopic = () => {
-        const sourceList = filteredBankQuestions.slice(0, 40);
-        if (sourceList.length === 0) {
-          showToast('Không có câu hỏi mẫu trong bộ lọc hiện tại để nhân bản.');
-          return;
-        }
-        const variantNum = Math.floor(Math.random() * 90) + 10;
-        const newTopicTitle = `${filterTopic === 'Tất cả' ? filterSubj : filterTopic} - Đề Tương Tự #${variantNum}`;
-        const cloned = cloneExistingTopicQuestions(sourceList, newTopicTitle, variantNum);
-        onAddTopic(filterSubj, filterGrade, newTopicTitle);
-        setQuestions(prev => [...cloned, ...prev]);
-        showToast(`Đã tạo nhanh bộ đề tương tự "${newTopicTitle}" (${cloned.length} câu) không cần API Key!`);
-      };
-
-      const filteredSubmissions = submissions.filter(s => {
-        if (subClassFilter !== 'Tất cả' && s.className !== subClassFilter) return false;
-        if (subSubjectFilter !== 'Tất cả' && s.subject !== subSubjectFilter) return false;
-        return true;
-      });
-
-      const exportSubmissionsCsv = () => {
-        if (filteredSubmissions.length === 0) return;
-        const BOM = '\uFEFF';
-        const header = 'STT,Họ và Tên,Lớp,Môn Học,Khối,Chủ Đề / Đề Thi,Số Câu Đúng,Tổng Số Câu,Điểm Hệ 10,Tỷ Lệ (%),Thời Gian Nộp\n';
-        const rows = filteredSubmissions.map((s, i) =>
-          `${i + 1},"${s.name}","${s.className}","${s.subject}","${s.grade}","${s.topic}",${s.score},${s.total},${s.score10},${s.percentage}%,"${s.submittedAt}"`
-        ).join('\n');
-        const blob = new Blob([BOM + header + rows], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `Ket_Qua_Lam_Bai_Hoc_Sinh_${new Date().toISOString().slice(0, 10)}.csv`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-        showToast('Đã xuất file Excel (.csv) kết quả làm bài của học sinh!');
-      };
+      const editableQuestions = questions.filter(q => q.subject === editSubj && q.grade === editGrade);
 
       return (
-        <div className="space-y-5">
-          {/* THANH TRẠNG THÁI & CHUYỂN TAB CON */}
-          <div className="bg-white p-4 rounded-2xl border border-slate-200 flex flex-wrap items-center justify-between gap-3">
-            <div className="flex flex-wrap gap-2">
+        <div className="space-y-4">
+          <div className="flex flex-wrap gap-2">
+            {[
+              { id: 'upload', label: '1. Upload PDF / Word & Tạo Đề' },
+              { id: 'customExams', label: `2. Kho Đề Riêng Đã Lưu (${customExams.length})` },
+              { id: 'batchEdit', label: '3. Sửa Ngân Hàng Có Sẵn' },
+              { id: 'results', label: `4. Kết Quả Học Sinh (${submissions.length})` }
+            ].map(t => (
               <button
-                onClick={() => setSubTab('bank_edit')}
-                className={`px-4 py-2 rounded-xl text-xs font-bold transition ${subTab === 'bank_edit' ? 'bg-emerald-600 text-white shadow' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+                key={t.id}
+                onClick={() => setSubTab(t.id)}
+                className={`px-3.5 py-2 rounded-xl text-xs font-bold ${subTab === t.id ? 'bg-emerald-600 text-white shadow' : 'bg-white border text-slate-700'}`}
               >
-                ✏️ Xem &amp; Sửa Nhiều Câu Cùng Lúc ({questions.length})
+                {t.label}
               </button>
-              <button
-                onClick={() => setSubTab('ai_upload')}
-                className={`px-4 py-2 rounded-xl text-xs font-bold transition ${subTab === 'ai_upload' ? 'bg-indigo-600 text-white shadow' : 'bg-indigo-50 text-indigo-800 hover:bg-indigo-100'}`}
-              >
-                📄 Upload PDF / Word &amp; Tạo Đề Tương Tự (Không cần API Key)
-              </button>
-              <button
-                onClick={() => setSubTab('submissions')}
-                className={`px-4 py-2 rounded-xl text-xs font-bold transition ${subTab === 'submissions' ? 'bg-amber-500 text-slate-900 shadow' : 'bg-amber-50 text-amber-900 hover:bg-amber-100'}`}
-              >
-                📊 Kết Quả Làm Bài Học Sinh ({submissions.length})
-              </button>
-            </div>
-            <button onClick={() => setIsAuthenticated(false)} className="text-xs font-bold text-rose-600 hover:underline">Đăng xuất</button>
+            ))}
           </div>
 
-          {/* TAB 1: XEM & SỬA NHIỀU CÂU HỎI CÙNG LÚC */}
-          {subTab === 'bank_edit' && (
-            <div className="bg-white p-5 rounded-2xl border border-slate-200 space-y-4 shadow-sm">
-              <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-3">
-                <div>
-                  <h3 className="font-extrabold text-base text-slate-800">Xem &amp; Chỉnh Sửa Hàng Loạt Câu Hỏi Trong Ngân Hàng</h3>
-                  <p className="text-xs text-slate-500">Thầy có thể sửa trực tiếp nội dung câu hỏi, đáp án A/B/C/D, chọn đáp án đúng và lời giải của nhiều câu cùng lúc.</p>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    onClick={handleCloneSelectedTopic}
-                    className="bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold shadow"
-                  >
-                    ✨ Nhân Bản Thành Đề Tương Tự Mới
-                  </button>
-                  <button
-                    onClick={handleSaveAllEdits}
-                    className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl text-xs font-bold shadow"
-                  >
-                    💾 Lưu Tất Cả Thay Đổi ({Object.keys(draftMap).length})
-                  </button>
-                </div>
-              </div>
-
-              {/* Bộ lọc */}
-              <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5 bg-slate-50 p-3 rounded-xl border">
-                <select value={filterSubj} onChange={e => { setFilterSubj(e.target.value); setFilterTopic('Tất cả'); }} className="p-2 border rounded-lg text-xs bg-white font-bold">
-                  <option value="Tiếng Anh">Môn: Tiếng Anh (100% MCQ)</option>
-                  <option value="Sinh học">Môn: Sinh học</option>
-                  <option value="Công nghệ Nông nghiệp">Môn: Công nghệ Nông nghiệp</option>
+          {subTab === 'upload' && (
+            <div className="bg-white p-5 rounded-2xl border space-y-4">
+              <h3 className="font-bold text-sm text-slate-800">Tạo Đề Hoàn Chỉnh Hoặc Đề Tương Tự Từ File PDF / Word (.docx)</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                <select value={subj} onChange={e => setSubj(e.target.value)} className="p-2.5 border rounded-xl bg-white font-bold">
+                  <option value="Tiếng Anh">Tiếng Anh (100% MCQ)</option>
+                  <option value="Sinh học">Sinh học</option>
+                  <option value="Công nghệ Nông nghiệp">Công nghệ Nông nghiệp</option>
                 </select>
-                <select value={filterGrade} onChange={e => { setFilterGrade(e.target.value); setFilterTopic('Tất cả'); }} className="p-2 border rounded-lg text-xs bg-white font-bold">
+                <select value={grade} onChange={e => setGrade(e.target.value)} className="p-2.5 border rounded-xl bg-white font-bold">
                   <option value="12">Khối 12</option>
                   <option value="11">Khối 11</option>
                   <option value="10">Khối 10</option>
                 </select>
-                <select value={filterTopic} onChange={e => setFilterTopic(e.target.value)} className="p-2 border rounded-lg text-xs bg-white">
-                  {availableTopics.map(t => <option key={t} value={t}>{t}</option>)}
-                </select>
                 <input
                   type="text"
-                  value={searchKeyword}
-                  onChange={e => setSearchKeyword(e.target.value)}
-                  placeholder="Tìm nhanh theo từ khóa..."
-                  className="p-2 border rounded-lg text-xs bg-white"
+                  value={topicName}
+                  onChange={e => setTopicName(e.target.value)}
+                  placeholder="Tên đề thi (VD: Đề thi thử lần 1)..."
+                  className="p-2.5 border rounded-xl"
+                />
+              </div>
+              <div className="flex items-center gap-2 text-xs">
+                <span className="font-bold text-slate-600">Mã đề xuất / lưu:</span>
+                <input
+                  type="text"
+                  value={customExamCode}
+                  onChange={e => setCustomExamCode(e.target.value)}
+                  className="w-24 p-2 border rounded-lg font-mono font-bold text-center"
                 />
               </div>
 
-              <div className="text-xs font-bold text-slate-600">
-                Đang hiển thị {filteredBankQuestions.length} câu hỏi cùng lúc:
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <label className="p-4 border-2 border-dashed border-blue-300 bg-blue-50/50 rounded-xl text-center cursor-pointer hover:bg-blue-50 transition">
+                  <span className="block font-bold text-xs text-blue-800">📄 Chế độ 1: Ra Đề Hoàn Chỉnh Từ File Upload</span>
+                  <span className="block text-[11px] text-slate-500 mt-1">Giữ nguyên câu hỏi, bảng biểu, ảnh &amp; đáp án tô đỏ / gạch dưới / bảng đáp án</span>
+                  <input type="file" accept=".pdf,.docx,.txt" onChange={e => handleUploadFile(e, 'exact')} className="hidden" />
+                </label>
+
+                <label className="p-4 border-2 border-dashed border-emerald-300 bg-emerald-50/50 rounded-xl text-center cursor-pointer hover:bg-emerald-50 transition">
+                  <span className="block font-bold text-xs text-emerald-800">✨ Chế độ 2: Tạo Đề Tương Tự Mới Từ Đề Gốc</span>
+                  <span className="block text-[11px] text-slate-500 mt-1">Biến đổi số liệu, đảo phương án &amp; cập nhật đáp án mới</span>
+                  <input type="file" accept=".pdf,.docx,.txt" onChange={e => handleUploadFile(e, 'similar')} className="hidden" />
+                </label>
               </div>
 
-              {/* Danh sách nhiều câu hỏi hiển thị đầy đủ để sửa cùng lúc */}
-              <div className="space-y-4 max-h-[650px] overflow-y-auto pr-1">
-                {filteredBankQuestions.map((origQ, idx) => {
-                  const q = draftMap[origQ.id] || origQ;
-                  const isDirty = Boolean(draftMap[origQ.id]);
+              {uploadStatus && <p className="text-xs font-semibold text-indigo-700 bg-indigo-50 p-2.5 rounded-lg">{uploadStatus}</p>}
+
+              {parsedList.length > 0 && (
+                <div className="space-y-3 border-t pt-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <button onClick={() => setPreviewMode(p => !p)} className="px-3 py-1.5 bg-slate-800 text-white rounded-lg text-xs font-bold">
+                      {previewMode ? 'Ẩn Xem Trước' : `👁️ Xem Trước Toàn Bộ (${parsedList.length} câu)`}
+                    </button>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        onClick={() => downloadExamAsWordDoc(topicName || `ĐỀ THI ${subj.toUpperCase()}`, customExamCode || '202', 'Thầy Trương Trung Can', '50', subj, grade, parsedList)}
+                        className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-bold"
+                      >
+                        📥 Xuất File Word (.DOC)
+                      </button>
+                      <button
+                        onClick={() => {
+                          const newExamObj = {
+                            id: Date.now(),
+                            title: topicName.trim() || `Đề ${subj} Khối ${grade}`,
+                            examCode: customExamCode.trim() || '202',
+                            subject: subj,
+                            grade,
+                            createdAt: new Date().toLocaleString('vi-VN'),
+                            questions: parsedList
+                          };
+                          setCustomExams(prev => [newExamObj, ...prev]);
+                          showToast(`Đã lưu thành bộ đề riêng "${newExamObj.title}" (Không lẫn vào ngân hàng có sẵn)!`);
+                        }}
+                        className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-bold"
+                      >
+                        💾 Lưu Thành Đề Riêng (Không Lẫn Ngân Hàng)
+                      </button>
+                    </div>
+                  </div>
+
+                  {previewMode && (
+                    <div className="max-h-96 overflow-y-auto space-y-2 border rounded-xl p-3 bg-slate-50 text-xs">
+                      {parsedList.map((q, idx) => (
+                        <div key={q.id} className="p-3 bg-white rounded-lg border space-y-1">
+                          <div className="font-bold">{subj === 'Tiếng Anh' ? `Question ${idx + 1}:` : `Câu ${idx + 1}:`} {q.question}</div>
+                          {q.richHtml && <div dangerouslySetInnerHTML={{ __html: q.richHtml }} />}
+                          {q.pageImage && <img src={q.pageImage} alt="Trang PDF" className="max-h-48 border rounded" />}
+                          {(q.options || []).map((o, oi) => (
+                            <div key={oi} className={q.correct === oi ? 'text-emerald-700 font-bold pl-3' : 'pl-3'}>
+                              {String.fromCharCode(65 + oi)}. {o} {q.correct === oi && '✓'}
+                            </div>
+                          ))}
+                          <div className="text-[11px] text-slate-500 italic">{q.explanation}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {subTab === 'customExams' && (
+            <div className="bg-white p-5 rounded-2xl border space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-3">
+                <div>
+                  <h3 className="font-bold text-sm text-slate-800">📁 Kho Đề Riêng Của Giáo Viên (Tách Biệt Hoàn Toàn Với Ngân Hàng Có Sẵn)</h3>
+                  <p className="text-[11px] text-slate-500">Các đề Thầy tải lên hoặc tạo tương tự được lưu nguyên bộ tại đây để xuất Word/PDF hoặc giao học sinh làm riêng.</p>
+                </div>
+              </div>
+
+              {customExams.length === 0 ? (
+                <div className="text-center py-10 text-xs text-slate-400 space-y-2">
+                  <p>Chưa có bộ đề riêng nào được lưu.</p>
+                  <p>Thầy hãy tạo đề ở tab <b>"1. Upload PDF / Word &amp; Tạo Đề"</b> rồi bấm <b>"💾 Lưu Thành Đề Riêng"</b> nhé!</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {customExams.map((ex, eIdx) => {
+                    const isViewing = viewingExamId === ex.id;
+                    return (
+                      <div key={ex.id} className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="px-2 py-0.5 bg-indigo-100 text-indigo-800 rounded font-mono text-[11px] font-bold">Mã đề: {ex.examCode}</span>
+                              <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded text-[11px] font-bold">{ex.subject} - Khối {ex.grade}</span>
+                              <span className="text-[11px] text-slate-400">{ex.createdAt}</span>
+                            </div>
+                            <h4 className="font-bold text-sm text-slate-800 mt-1">{eIdx + 1}. {ex.title} ({ex.questions.length} câu hỏi)</h4>
+                          </div>
+
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              onClick={() => setViewingExamId(isViewing ? null : ex.id)}
+                              className="px-3 py-1.5 bg-slate-800 text-white rounded-lg text-xs font-bold"
+                            >
+                              {isViewing ? 'Thu Gọn' : '👁️ Xem Chi Tiết'}
+                            </button>
+                            <button
+                              onClick={() => downloadExamAsWordDoc(ex.title, ex.examCode, 'Thầy Trương Trung Can', '50', ex.subject, ex.grade, ex.questions)}
+                              className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-bold"
+                            >
+                              📥 Xuất Word (.DOC)
+                            </button>
+                            <button
+                              onClick={() => setCustomExams(prev => prev.filter(item => item.id !== ex.id))}
+                              className="px-3 py-1.5 bg-rose-50 text-rose-600 border border-rose-200 rounded-lg text-xs font-bold"
+                            >
+                              Xóa Đề
+                            </button>
+                          </div>
+                        </div>
+
+                        {isViewing && (
+                          <div className="max-h-80 overflow-y-auto space-y-2 border-t pt-3 text-xs">
+                            {ex.questions.map((q, qi) => (
+                              <div key={q.id || qi} className="p-2.5 bg-white rounded-lg border space-y-1">
+                                <div className="font-bold">{ex.subject === 'Tiếng Anh' ? `Question ${qi + 1}:` : `Câu ${qi + 1}:`} {q.question}</div>
+                                {(q.options || []).map((opt, oi) => (
+                                  <div key={oi} className={q.correct === oi ? 'text-emerald-700 font-bold pl-3' : 'pl-3'}>
+                                    {String.fromCharCode(65 + oi)}. {opt} {q.correct === oi && '✓'}
+                                  </div>
+                                ))}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {subTab === 'batchEdit' && (
+            <div className="bg-white p-5 rounded-2xl border space-y-4">
+              <div className="flex flex-wrap gap-2 items-center justify-between">
+                <div className="flex gap-2">
+                  <select value={editSubj} onChange={e => setEditSubj(e.target.value)} className="p-2 border rounded-lg text-xs font-bold">
+                    <option value="Tiếng Anh">Tiếng Anh</option>
+                    <option value="Sinh học">Sinh học</option>
+                    <option value="Công nghệ Nông nghiệp">Công nghệ Nông nghiệp</option>
+                  </select>
+                  <select value={editGrade} onChange={e => setEditGrade(e.target.value)} className="p-2 border rounded-lg text-xs font-bold">
+                    <option value="12">Khối 12</option>
+                    <option value="11">Khối 11</option>
+                    <option value="10">Khối 10</option>
+                  </select>
+                </div>
+                <button
+                  onClick={() => {
+                    setQuestions(prev => prev.map(q => drafts[q.id] ? drafts[q.id] : q));
+                    setDrafts({});
+                    showToast('Đã lưu tất cả chỉnh sửa ngân hàng!');
+                  }}
+                  className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-xs font-bold"
+                >
+                  💾 Lưu Tất Cả Thay Đổi
+                </button>
+              </div>
+              <div className="space-y-3 max-h-[500px] overflow-y-auto">
+                {editableQuestions.map((q, idx) => {
+                  const curItem = drafts[q.id] || q;
                   return (
-                    <div key={q.id} className={`p-4 rounded-xl border space-y-3 text-xs ${isDirty ? 'bg-amber-50/60 border-amber-400' : 'bg-slate-50 border-slate-200'}`}>
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div className="flex items-center gap-2">
-                          <span className="bg-emerald-700 text-white font-bold px-2.5 py-0.5 rounded">Câu {idx + 1}</span>
-                          <span className="text-[11px] font-semibold text-slate-600">{q.topic}</span>
-                          <span className="bg-indigo-100 text-indigo-800 font-bold px-2 py-0.5 rounded uppercase">{q.subject === 'Tiếng Anh' ? 'MCQ' : q.type}</span>
-                          {isDirty && <span className="text-amber-700 font-bold">● Đã chỉnh sửa (chưa lưu)</span>}
-                        </div>
-                        <button
-                          onClick={() => setQuestions(prev => prev.filter(item => item.id !== q.id))}
-                          className="text-rose-600 hover:underline font-bold"
-                        >
-                          Xóa câu
-                        </button>
-                      </div>
-
-                      <div>
-                        <label className="block font-bold text-slate-600 mb-1">Nội dung câu hỏi:</label>
-                        <textarea
-                          rows={2}
-                          value={q.question}
-                          onChange={e => updateDraft(origQ, { question: e.target.value })}
-                          className="w-full p-2.5 bg-white border border-slate-300 rounded-lg text-xs leading-relaxed"
-                        />
-                      </div>
-
-                      {/* Chỉnh sửa 4 phương án A, B, C, D */}
-                      {(q.type === 'mcq' || q.subject === 'Tiếng Anh') && Array.isArray(q.options) && (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                          {q.options.map((opt, oIdx) => (
-                            <div key={oIdx} className={`flex items-center gap-2 p-2 rounded-lg border ${q.correct === oIdx ? 'bg-emerald-50 border-emerald-500' : 'bg-white border-slate-200'}`}>
-                              <input
-                                type="radio"
-                                name={`correct_${q.id}`}
-                                checked={q.correct === oIdx}
-                                onChange={() => updateDraft(origQ, { correct: oIdx })}
-                                title="Chọn làm đáp án đúng"
-                              />
-                              <span className="font-bold text-slate-700">{String.fromCharCode(65 + oIdx)}.</span>
-                              <input
-                                type="text"
-                                value={opt}
-                                onChange={e => {
-                                  const nextOpts = [...q.options];
-                                  nextOpts[oIdx] = e.target.value;
-                                  updateDraft(origQ, { options: nextOpts });
-                                }}
-                                className="flex-1 bg-transparent outline-none text-xs"
-                              />
-                            </div>
-                          ))}
-                        </div>
-                      )}
-
-                      {/* Chỉnh sửa Đúng/Sai 4 ý (cho Sinh học / Công nghệ) */}
-                      {q.subject !== 'Tiếng Anh' && q.type === 'tf' && Array.isArray(q.items) && (
-                        <div className="space-y-1.5">
-                          {q.items.map((it, itIdx) => (
-                            <div key={it.id} className="flex items-center gap-2 bg-white p-2 rounded border">
-                              <input
-                                type="text"
-                                value={it.statement}
-                                onChange={e => {
-                                  const nextItems = [...q.items];
-                                  nextItems[itIdx] = { ...it, statement: e.target.value };
-                                  updateDraft(origQ, { items: nextItems });
-                                }}
-                                className="flex-1 text-xs outline-none"
-                              />
-                              <select
-                                value={it.correct ? 'true' : 'false'}
-                                onChange={e => {
-                                  const nextItems = [...q.items];
-                                  nextItems[itIdx] = { ...it, correct: e.target.value === 'true' };
-                                  updateDraft(origQ, { items: nextItems });
-                                }}
-                                className="border rounded p-1 text-xs font-bold"
-                              >
-                                <option value="true">Đúng</option>
-                                <option value="false">Sai</option>
-                              </select>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-
-                      {/* Chỉnh sửa Trả lời ngắn */}
-                      {q.subject !== 'Tiếng Anh' && q.type === 'sa' && (
-                        <div className="flex items-center gap-2">
-                          <span className="font-bold">Đáp số chuẩn:</span>
-                          <input
-                            type="text"
-                            value={q.correctAnswer || ''}
-                            onChange={e => updateDraft(origQ, { correctAnswer: e.target.value })}
-                            className="p-1.5 bg-white border rounded font-mono text-xs"
-                          />
-                        </div>
-                      )}
-
-                      <div>
-                        <label className="block font-bold text-slate-600 mb-1">Lời giải chi tiết:</label>
-                        <input
-                          type="text"
-                          value={q.explanation || ''}
-                          onChange={e => updateDraft(origQ, { explanation: e.target.value })}
-                          className="w-full p-2 bg-white border border-slate-300 rounded-lg text-xs"
-                        />
+                    <div key={q.id} className="p-3 bg-slate-50 border rounded-xl space-y-2 text-xs">
+                      <div className="font-bold text-slate-700">{editSubj === 'Tiếng Anh' ? `Question ${idx + 1}` : `Câu ${idx + 1}`}</div>
+                      <textarea
+                        rows={2}
+                        value={curItem.question}
+                        onChange={e => setDrafts(p => ({ ...p, [q.id]: { ...curItem, question: e.target.value } }))}
+                        className="w-full p-2 bg-white border rounded-lg"
+                      />
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {(curItem.options || []).map((opt, oi) => (
+                          <div key={oi} className="flex items-center gap-1.5">
+                            <input
+                              type="radio"
+                              checked={curItem.correct === oi}
+                              onChange={() => setDrafts(p => ({ ...p, [q.id]: { ...curItem, correct: oi } }))}
+                            />
+                            <input
+                              type="text"
+                              value={opt}
+                              onChange={e => {
+                                const nextOpts = [...(curItem.options || [])];
+                                nextOpts[oi] = e.target.value;
+                                setDrafts(p => ({ ...p, [q.id]: { ...curItem, options: nextOpts } }));
+                              }}
+                              className="flex-1 p-1.5 bg-white border rounded"
+                            />
+                          </div>
+                        ))}
                       </div>
                     </div>
                   );
@@ -1629,335 +1282,41 @@
             </div>
           )}
 
-          {/* TAB 2: UPLOAD PDF / WORD & TẠO ĐỀ TƯƠNG TỰ (KHÔNG BAO GIỜ ĐÒI API KEY) */}
-          {subTab === 'ai_upload' && (
-            <div className="bg-white p-6 rounded-2xl border border-slate-200 space-y-5 shadow-sm">
-              <div className="border-b pb-3">
-                <h3 className="font-extrabold text-base text-slate-800">Tạo Đề Tương Tự Từ File PDF / Word (.docx) — Hoạt Động Trực Tiếp Không Cần API Key</h3>
-                <p className="text-xs text-slate-500 mt-1">
-                  Hệ thống tích hợp sẵn bộ đọc <b>PDF.js</b> và <b>Mammoth Word</b> ngay trên trình duyệt: Thầy chỉ cần đính kèm file đề <b>.pdf</b> hoặc <b>.docx</b>, ứng dụng sẽ tự động tách câu hỏi và tạo bộ đề tương tự để học sinh luyện tập.
-                </p>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div>
-                  <label className="block text-xs font-bold mb-1">Môn học áp dụng:</label>
-                  <select value={uploadSubj} onChange={e => setUploadSubj(e.target.value)} className="w-full p-2.5 border rounded-xl text-xs bg-white font-bold">
-                    <option value="Tiếng Anh">Tiếng Anh (100% MCQ)</option>
-                    <option value="Sinh học">Sinh học</option>
-                    <option value="Công nghệ Nông nghiệp">Công nghệ Nông nghiệp</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-bold mb-1">Khối lớp:</label>
-                  <select value={uploadGrade} onChange={e => setUploadGrade(e.target.value)} className="w-full p-2.5 border rounded-xl text-xs bg-white font-bold">
-                    <option value="12">Khối 12</option>
-                    <option value="11">Khối 11</option>
-                    <option value="10">Khối 10</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-bold mb-1">Tên Bộ Đề / Chủ Đề Lưu Vào Ngân Hàng:</label>
-                  <input
-                    type="text"
-                    value={uploadTopicName}
-                    onChange={e => setUploadTopicName(e.target.value)}
-                    className="w-full p-2.5 border rounded-xl text-xs bg-white"
-                  />
-                </div>
-              </div>
-
-              {/* Khu vực đính kèm file PDF / DOCX */}
-              <div className="border-2 border-dashed border-indigo-300 bg-indigo-50/40 rounded-2xl p-6 text-center space-y-3">
-                <div className="text-3xl">📂</div>
-                <p className="text-xs font-bold text-indigo-900">
-                  Chọn tệp đề thi định dạng <b>.PDF</b>, <b>.DOCX</b> hoặc <b>.TXT</b> từ máy tính của Thầy
-                </p>
-                <label className="inline-block bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl text-xs font-bold cursor-pointer shadow">
-                  <span>{isReadingFile ? 'Đang đọc nội dung file...' : '📎 Đính Kèm File PDF / Word (.docx)'}</span>
-                  <input
-                    type="file"
-                    accept=".pdf,.docx,.txt"
-                    onChange={handleFileUpload}
-                    className="hidden"
-                  />
-                </label>
-                {uploadedFileName && (
-                  <p className="text-xs text-emerald-700 font-bold">✓ Đã nạp tệp: {uploadedFileName}</p>
+          {subTab === 'results' && (
+            <div className="bg-white p-5 rounded-2xl border space-y-3">
+              <div className="flex justify-between items-center">
+                <h3 className="font-bold text-sm">Kết Quả Làm Bài Của Học Sinh ({submissions.length})</h3>
+                {submissions.length > 0 && (
+                  <button
+                    onClick={() => setSubmissions([])}
+                    className="px-3 py-1.5 bg-rose-50 text-rose-600 border border-rose-200 rounded-lg text-xs font-bold"
+                  >
+                    Xóa Lịch Sử
+                  </button>
                 )}
               </div>
-
-              <div className="flex items-center justify-between flex-wrap gap-3 bg-slate-50 p-3 rounded-xl border">
-                <label className="flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={generateSimilarFlag}
-                    onChange={e => setGenerateSimilarFlag(e.target.checked)}
-                    className="w-4 h-4"
-                  />
-                  <span>Tự động biến đổi &amp; xáo trộn tạo thành Đề Tương Tự mới (Thay vì chỉ nhập nguyên bản)</span>
-                </label>
-                <button
-                  onClick={() => {
-                    if (!rawExtractedText.trim()) {
-                      showToast('Vui lòng đính kèm file PDF/Word hoặc dán nội dung đề trước!');
-                      return;
-                    }
-                    const gen = parseAndGenerateSimilarFromText(rawExtractedText, uploadSubj, uploadGrade, uploadTopicName, generateSimilarFlag);
-                    setPreviewGeneratedList(gen);
-                    showToast(`Đã tạo ${gen.length} câu hỏi từ nội dung đề!`);
-                  }}
-                  className="bg-slate-800 hover:bg-slate-900 text-white px-4 py-2 rounded-xl text-xs font-bold"
-                >
-                  🔄 Phân Tích &amp; Sinh Đề Ngay
-                </button>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-600 mb-1">Nội dung văn bản trích xuất từ PDF/Word (Thầy có thể chỉnh sửa thêm nếu muốn):</label>
-                <textarea
-                  rows={6}
-                  value={rawExtractedText}
-                  onChange={e => setRawExtractedText(e.target.value)}
-                  placeholder="Nội dung từ file PDF hoặc Word sẽ hiển thị tại đây..."
-                  className="w-full p-3 border rounded-xl text-xs font-mono bg-slate-50"
-                />
-              </div>
-
-              {previewGeneratedList.length > 0 && (
-                <div className="border-t pt-4 space-y-4">
-                  <div className="bg-emerald-50 border border-emerald-300 p-4 rounded-2xl flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <span className="text-sm font-extrabold text-emerald-900 block">
-                        🎉 Đã tạo hoàn chỉnh đề thi gồm {previewGeneratedList.length} câu hỏi!
-                      </span>
-                      <span className="text-xs text-emerald-700">Thầy có thể xem trước toàn bộ đề, xuất ra file Word (.doc), in PDF hoặc lưu vào ngân hàng cho học sinh làm bài.</span>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <input
-                        type="text"
-                        value={previewExamCode}
-                        onChange={e => setPreviewExamCode(e.target.value)}
-                        placeholder="Mã đề"
-                        title="Nhập mã đề xuất file"
-                        className="w-20 p-2 border border-emerald-400 rounded-xl text-xs font-mono font-bold text-center bg-white"
-                      />
-                      <button
-                        onClick={() => setShowFullExamModal(true)}
-                        className="bg-slate-800 hover:bg-slate-900 text-white px-4 py-2.5 rounded-xl text-xs font-bold shadow"
-                      >
-                        👁️ Xem Trước Toàn Bộ Đề
-                      </button>
-                      <button
-                        onClick={() => {
-                          downloadExamAsWordDoc(previewGeneratedList, uploadTopicName, uploadSubj, uploadGrade, previewExamCode);
-                          showToast('Đã xuất file Word (.doc) đề thi hoàn chỉnh kèm bảng đáp án!');
-                        }}
-                        className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl text-xs font-bold shadow"
-                      >
-                        📥 Xuất File Word (.DOC)
-                      </button>
-                      <button
-                        onClick={() => {
-                          onAddTopic(uploadSubj, uploadGrade, uploadTopicName);
-                          setQuestions(prev => [...previewGeneratedList, ...prev]);
-                          showToast(`Đã lưu toàn bộ ${previewGeneratedList.length} câu hỏi vào ngân hàng ôn luyện!`);
-                        }}
-                        className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-xl text-xs font-bold shadow"
-                      >
-                        ✅ Lưu Vào Ngân Hàng
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Danh sách xem nhanh tất cả các câu trong đề vừa tạo */}
-                  <div className="space-y-2.5 max-h-[480px] overflow-y-auto bg-slate-50 p-4 rounded-xl border">
-                    {previewGeneratedList.map((item, i) => (
-                      <div key={item.id} className="p-3.5 bg-white rounded-xl border border-slate-200 text-xs space-y-2 shadow-sm">
-                        <div className="flex justify-between items-start gap-2">
-                          <p className="font-bold text-slate-800 leading-relaxed">
-                            <span className="text-indigo-700 mr-1.5">Question {i + 1}:</span>
-                            {item.question}
-                          </p>
-                          <span className="bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded shrink-0">
-                            Đáp án: {String.fromCharCode(65 + (item.correct || 0))}
-                          </span>
-                        </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-xs text-slate-700 pl-3">
-                          {item.options?.map((o, oi) => (
-                            <div key={oi} className={`p-1.5 rounded ${item.correct === oi ? 'bg-emerald-50 text-emerald-900 font-bold border border-emerald-300' : ''}`}>
-                              <b>{String.fromCharCode(65 + oi)}.</b> {o}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* MODAL XEM TRƯỚC ĐỀ THI HOÀN CHỈNH CHUẨN IN ẤN & XUẤT FILE */}
-              {showFullExamModal && previewGeneratedList.length > 0 && (
-                <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-6">
-                  <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[92vh] flex flex-col shadow-2xl overflow-hidden">
-                    <div className="p-4 bg-slate-800 text-white flex flex-wrap items-center justify-between gap-2 print:hidden">
-                      <span className="font-bold text-sm">Xem Trước Đề Thi Hoàn Chỉnh ({previewGeneratedList.length} câu - Mã đề {previewExamCode})</span>
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => {
-                            downloadExamAsWordDoc(previewGeneratedList, uploadTopicName, uploadSubj, uploadGrade, previewExamCode);
-                            showToast('Đã tải xuống file Word (.doc)!');
-                          }}
-                          className="bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-1.5 rounded-lg text-xs font-bold"
-                        >
-                          📥 Tải File Word (.DOC)
-                        </button>
-                        <button
-                          onClick={() => window.print()}
-                          className="bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-1.5 rounded-lg text-xs font-bold"
-                        >
-                          🖨️ In / Xuất PDF
-                        </button>
-                        <button
-                          onClick={() => setShowFullExamModal(false)}
-                          className="bg-slate-600 hover:bg-slate-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold"
-                        >
-                          ✕ Đóng
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="p-6 sm:p-10 overflow-y-auto font-serif text-sm space-y-5 bg-white">
-                      <div className="border-b-2 border-slate-900 pb-4 flex justify-between text-center">
-                        <div className="w-1/2">
-                          <p className="font-bold uppercase">SỞ GIÁO DỤC VÀ ĐÀO TẠO</p>
-                          <p className="font-bold uppercase">LỚP ÔN THI THẦY TRƯƠNG TRUNG CAN</p>
-                          <p className="text-xs italic mt-1">(Đề thi gồm {previewGeneratedList.length} câu hỏi)</p>
-                        </div>
-                        <div className="w-1/2">
-                          <p className="font-bold uppercase">{uploadTopicName}</p>
-                          <p className="font-bold">Môn: {uploadSubj.toUpperCase()} - Khối {uploadGrade}</p>
-                          <p className="font-mono text-xs font-bold mt-1">Mã đề: {previewExamCode}</p>
-                        </div>
-                      </div>
-
-                      <div className="space-y-4">
-                        {previewGeneratedList.map((q, idx) => (
-                          <div key={q.id} className="space-y-1">
-                            <p className="whitespace-pre-line"><b>Question {idx + 1}:</b> {q.question}</p>
-                            {Array.isArray(q.options) && (
-                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1 pl-5">
-                                {q.options.map((opt, oi) => (
-                                  <p key={oi}><b>{String.fromCharCode(65 + oi)}.</b> {opt}</p>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-
-                      <div className="pt-6 border-t-2 border-slate-900">
-                        <h4 className="font-bold text-center uppercase mb-3">BẢNG ĐÁP ÁN MÃ ĐỀ {previewExamCode}</h4>
-                        <div className="grid grid-cols-5 sm:grid-cols-10 gap-2 text-center font-mono text-xs">
-                          {previewGeneratedList.map((q, i) => (
-                            <div key={q.id} className="border border-slate-800 p-1.5">
-                              <b>{i + 1}.</b> {String.fromCharCode(65 + (q.correct || 0))}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* TAB 3: XEM & XUẤT KẾT QUẢ LÀM BÀI CỦA HỌC SINH */}
-          {subTab === 'submissions' && (
-            <div className="bg-white p-5 rounded-2xl border border-slate-200 space-y-4 shadow-sm">
-              <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-3">
-                <div>
-                  <h3 className="font-extrabold text-base text-slate-800">Bảng Thống Kê &amp; Xuất Kết Quả Làm Bài Của Học Sinh</h3>
-                  <p className="text-xs text-slate-500">Theo dõi chi tiết điểm số, lớp, thời gian nộp bài và xuất ra file Excel (.csv).</p>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    onClick={exportSubmissionsCsv}
-                    disabled={filteredSubmissions.length === 0}
-                    className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-4 py-2 rounded-xl text-xs font-bold shadow"
-                  >
-                    📥 Xuất File Excel (.CSV)
-                  </button>
-                  {submissions.length > 0 && (
-                    <button
-                      onClick={() => setSubmissions([])}
-                      className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 px-3 py-2 rounded-xl text-xs font-bold"
-                    >
-                      Xóa lịch sử
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl">
-                  <span className="text-xs text-emerald-700 font-semibold">Tổng lượt nộp bài:</span>
-                  <p className="text-2xl font-black text-emerald-900">{filteredSubmissions.length}</p>
-                </div>
-                <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-xl">
-                  <span className="text-xs text-indigo-700 font-semibold">Điểm trung bình (thang 10):</span>
-                  <p className="text-2xl font-black text-indigo-900">
-                    {filteredSubmissions.length > 0
-                      ? (filteredSubmissions.reduce((s, a) => s + Number(a.score10 || 0), 0) / filteredSubmissions.length).toFixed(2)
-                      : '0.00'}
-                  </p>
-                </div>
-                <div className="p-3 bg-slate-50 border rounded-xl space-y-1.5">
-                  <span className="text-xs font-bold text-slate-600">Lọc theo Môn học:</span>
-                  <select value={subSubjectFilter} onChange={e => setSubSubjectFilter(e.target.value)} className="w-full p-1.5 border rounded text-xs bg-white">
-                    <option value="Tất cả">Tất cả các môn</option>
-                    <option value="Tiếng Anh">Tiếng Anh</option>
-                    <option value="Sinh học">Sinh học</option>
-                    <option value="Công nghệ Nông nghiệp">Công nghệ Nông nghiệp</option>
-                  </select>
-                </div>
-              </div>
-
-              {filteredSubmissions.length === 0 ? (
-                <div className="text-center py-10 text-xs text-slate-400">
-                  Chưa có học sinh nào nộp bài. Khi học sinh làm bài ở tab "Luyện Trắc Nghiệm" và nhấn Nộp Bài, kết quả sẽ hiển thị tại đây.
-                </div>
+              {submissions.length === 0 ? (
+                <p className="text-xs text-slate-400 text-center py-8">Chưa có dữ liệu bài nộp.</p>
               ) : (
-                <div className="overflow-x-auto border rounded-xl">
+                <div className="overflow-x-auto">
                   <table className="w-full text-left border-collapse text-xs">
                     <thead>
-                      <tr className="bg-slate-100 text-slate-700 font-bold border-b">
-                        <th className="p-3">STT</th>
-                        <th className="p-3">Họ và Tên</th>
-                        <th className="p-3">Lớp</th>
-                        <th className="p-3">Môn / Khối</th>
-                        <th className="p-3">Đề Thi / Chủ Đề</th>
-                        <th className="p-3">Số Câu Đúng</th>
-                        <th className="p-3">Điểm (Hệ 10)</th>
-                        <th className="p-3">Thời Gian Nộp</th>
+                      <tr className="bg-slate-100 border-b">
+                        <th className="p-2.5">Họ Tên</th>
+                        <th className="p-2.5">Lớp</th>
+                        <th className="p-2.5">Môn / Đề</th>
+                        <th className="p-2.5">Điểm</th>
+                        <th className="p-2.5">Thời Gian</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y">
-                      {filteredSubmissions.map((s, idx) => (
-                        <tr key={s.id} className="hover:bg-slate-50">
-                          <td className="p-3 font-mono">{idx + 1}</td>
-                          <td className="p-3 font-bold text-slate-800">{s.name}</td>
-                          <td className="p-3">{s.className}</td>
-                          <td className="p-3">{s.subject} ({s.grade})</td>
-                          <td className="p-3 text-emerald-800 font-medium">{s.topic}</td>
-                          <td className="p-3 font-mono font-bold">{s.score} / {s.total}</td>
-                          <td className="p-3">
-                            <span className="bg-emerald-100 text-emerald-800 font-extrabold px-2 py-0.5 rounded">
-                              {s.score10} đ ({s.percentage}%)
-                            </span>
-                          </td>
-                          <td className="p-3 text-slate-500 font-mono">{s.submittedAt}</td>
+                      {submissions.map(s => (
+                        <tr key={s.id}>
+                          <td className="p-2.5 font-bold">{s.name}</td>
+                          <td className="p-2.5">{s.className}</td>
+                          <td className="p-2.5">{s.subject} - {s.topic}</td>
+                          <td className="p-2.5 font-bold text-emerald-700">{s.score}/{s.total}</td>
+                          <td className="p-2.5 text-slate-400">{s.submittedAt}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -1970,88 +1329,96 @@
       );
     }
 
-    // =========================================================================
-    // 7. SECTION XUẤT ĐỀ THI RA PDF / IN ẤN
-    // =========================================================================
-    function ExporterSection({ questions, topicsMap, selectedSubject, setSelectedSubject, selectedGrade, setSelectedGrade }) {
+    function ExporterView({ questions, customExams, topicsMap, selectedSubject, setSelectedSubject, selectedGrade, setSelectedGrade }) {
       const [selectedTopic, setSelectedTopic] = useState('Tất cả');
-      const [examCode, setExamCode] = useState('1102');
-      const [showAnswerKey, setShowAnswerKey] = useState(true);
+      const [selectedCustomExamId, setSelectedCustomExamId] = useState('');
+      const [examCode, setExamCode] = useState('101');
+      const topics = useMemo(() => ['Tất cả', ...(topicsMap[selectedSubject]?.[selectedGrade] || [])], [topicsMap, selectedSubject, selectedGrade]);
+      const matchingCustomExams = useMemo(
+        () => (customExams || []).filter(ex => ex.subject === selectedSubject && ex.grade === selectedGrade),
+        [customExams, selectedSubject, selectedGrade]
+      );
+      const activeCustomExam = useMemo(
+        () => matchingCustomExams.find(ex => String(ex.id) === String(selectedCustomExamId)) || null,
+        [matchingCustomExams, selectedCustomExamId]
+      );
+      const exportList = useMemo(() => {
+        if (activeCustomExam) return activeCustomExam.questions;
+        return questions.filter(q =>
+          q.subject === selectedSubject &&
+          q.grade === selectedGrade &&
+          (selectedSubject !== 'Tiếng Anh' || q.type === 'mcq') &&
+          (selectedTopic === 'Tất cả' || q.topic === selectedTopic)
+        );
+      }, [questions, activeCustomExam, selectedSubject, selectedGrade, selectedTopic]);
 
-      const availableTopics = ['Tất cả', ...(topicsMap[selectedSubject]?.[selectedGrade] || [])];
-      const exportList = questions.filter(q => {
-        if (q.subject !== selectedSubject || q.grade !== selectedGrade) return false;
-        if (selectedSubject === 'Tiếng Anh' && q.type !== 'mcq') return false;
-        if (selectedTopic !== 'Tất cả' && q.topic !== selectedTopic) return false;
-        return true;
-      });
+      const labelWord = selectedSubject === 'Tiếng Anh' ? 'Question' : 'Câu';
 
       return (
-        <div className="space-y-5">
-          <div className="bg-white p-4 rounded-2xl border border-slate-200 flex flex-wrap items-center gap-3 print:hidden">
-            <select value={selectedSubject} onChange={e => { setSelectedSubject(e.target.value); setSelectedTopic('Tất cả'); }} className="p-2 border rounded-xl text-xs bg-white font-bold">
-              <option value="Tiếng Anh">Tiếng Anh</option>
+        <div className="space-y-4">
+          <div className="bg-white p-4 rounded-xl border flex flex-wrap gap-2 items-center print:hidden">
+            <select value={selectedSubject} onChange={e => { setSelectedSubject(e.target.value); setSelectedTopic('Tất cả'); setSelectedCustomExamId(''); }} className="p-2 border rounded-lg text-xs bg-white font-bold">
               <option value="Sinh học">Sinh học</option>
               <option value="Công nghệ Nông nghiệp">Công nghệ Nông nghiệp</option>
+              <option value="Tiếng Anh">Tiếng Anh</option>
             </select>
-            <select value={selectedGrade} onChange={e => { setSelectedGrade(e.target.value); setSelectedTopic('Tất cả'); }} className="p-2 border rounded-xl text-xs bg-white font-bold">
+            <select value={selectedGrade} onChange={e => { setSelectedGrade(e.target.value); setSelectedTopic('Tất cả'); setSelectedCustomExamId(''); }} className="p-2 border rounded-lg text-xs bg-white font-bold">
               <option value="12">Khối 12</option>
               <option value="11">Khối 11</option>
               <option value="10">Khối 10</option>
             </select>
-            <select value={selectedTopic} onChange={e => setSelectedTopic(e.target.value)} className="p-2 border rounded-xl text-xs bg-white max-w-xs">
-              {availableTopics.map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
-            <input type="text" value={examCode} onChange={e => setExamCode(e.target.value)} placeholder="Mã đề..." className="w-24 p-2 border rounded-xl text-xs font-mono" />
-            <label className="flex items-center gap-1.5 text-xs font-semibold">
-              <input type="checkbox" checked={showAnswerKey} onChange={e => setShowAnswerKey(e.target.checked)} />
-              <span>Kèm đáp án</span>
-            </label>
-            <button onClick={() => window.print()} className="ml-auto bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl text-xs font-bold shadow">
-              🖨️ In / Lưu File PDF
-            </button>
+            {matchingCustomExams.length > 0 && (
+              <select
+                value={selectedCustomExamId}
+                onChange={e => {
+                  setSelectedCustomExamId(e.target.value);
+                  const found = matchingCustomExams.find(ex => String(ex.id) === String(e.target.value));
+                  if (found) setExamCode(found.examCode || '202');
+                }}
+                className="p-2 border border-indigo-300 rounded-lg text-xs bg-indigo-50 font-bold text-indigo-900"
+              >
+                <option value="">Nguồn: Ngân hàng có sẵn</option>
+                {matchingCustomExams.map(ex => (
+                  <option key={ex.id} value={ex.id}>📁 Đề riêng: {ex.title} (Mã {ex.examCode})</option>
+                ))}
+              </select>
+            )}
+            {!selectedCustomExamId && (
+              <select value={selectedTopic} onChange={e => setSelectedTopic(e.target.value)} className="p-2 border rounded-lg text-xs bg-white">
+                {topics.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            )}
+            <input type="text" value={examCode} onChange={e => setExamCode(e.target.value)} className="w-20 p-2 border rounded-lg text-xs font-mono" placeholder="Mã đề" />
+            <div className="ml-auto flex gap-2">
+              <button
+                onClick={() => downloadExamAsWordDoc(activeCustomExam ? activeCustomExam.title : `ĐỀ KIỂM TRA MÔN ${selectedSubject.toUpperCase()}`, examCode, 'Thầy Trương Trung Can', '50', selectedSubject, selectedGrade, exportList)}
+                className="px-3 py-2 bg-blue-600 text-white rounded-lg text-xs font-bold"
+              >
+                📥 Tải File Word (.DOC)
+              </button>
+              <button onClick={() => window.print()} className="px-3 py-2 bg-emerald-600 text-white rounded-lg text-xs font-bold">
+                🖨️ In / Lưu PDF
+              </button>
+            </div>
           </div>
 
-          <div className="bg-white p-8 sm:p-10 rounded-2xl border border-slate-200 font-serif text-sm space-y-6 print:border-none print:p-0">
-            <div className="border-b-2 border-slate-900 pb-4 flex justify-between text-center">
-              <div className="w-1/2">
-                <p className="font-bold uppercase">SỞ GIÁO DỤC VÀ ĐÀO TẠO</p>
-                <p className="font-bold uppercase">LỚP ÔN THI THẦY TRƯƠNG TRUNG CAN</p>
-              </div>
-              <div className="w-1/2">
-                <p className="font-bold uppercase">ĐỀ ÔN TẬP TỐT NGHIỆP THPT</p>
-                <p className="font-bold">Môn: {selectedSubject.toUpperCase()} - Khối {selectedGrade}</p>
-                <p className="font-mono text-xs font-bold">Mã đề: {examCode}</p>
-              </div>
+          <div className="bg-white p-8 rounded-xl border font-serif text-sm space-y-5 print:border-none print:p-0">
+            <div className="text-center border-b-2 border-slate-900 pb-3">
+              <h2 className="font-bold text-base uppercase">{activeCustomExam ? activeCustomExam.title : `ĐỀ KIỂM TRA ÔN TẬP MÔN ${selectedSubject.toUpperCase()} - KHỐI ${selectedGrade}`}</h2>
+              <p className="text-xs italic">Giáo viên: Thầy Trương Trung Can | Mã đề: {examCode}</p>
             </div>
-
-            <div className="space-y-5">
-              {exportList.map((q, idx) => (
-                <div key={q.id} className="space-y-1.5">
-                  <p className="whitespace-pre-line"><b>Question {idx + 1}:</b> {q.question}</p>
-                  {Array.isArray(q.options) && (
-                    <div className="grid grid-cols-2 gap-x-6 gap-y-1 pl-5">
-                      {q.options.map((opt, oi) => (
-                        <p key={oi}><b>{String.fromCharCode(65 + oi)}.</b> {opt}</p>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-
-            {showAnswerKey && exportList.length > 0 && (
-              <div className="pt-6 border-t-2 border-slate-900">
-                <h4 className="font-bold text-center uppercase mb-3">BẢNG ĐÁP ÁN MÃ ĐỀ {examCode}</h4>
-                <div className="grid grid-cols-5 sm:grid-cols-10 gap-2 text-center font-mono text-xs">
-                  {exportList.map((q, i) => (
-                    <div key={q.id} className="border border-slate-800 p-1.5">
-                      <b>{i + 1}.</b> {q.type === 'mcq' ? String.fromCharCode(65 + q.correct) : q.correctAnswer || 'Đ/S'}
-                    </div>
+            {exportList.map((q, idx) => (
+              <div key={q.id} className="space-y-1">
+                <p className="font-bold">{labelWord} {idx + 1}: <span className="font-normal">{q.question}</span></p>
+                {q.richHtml && <div dangerouslySetInnerHTML={{ __html: q.richHtml }} />}
+                {q.pageImage && <img src={q.pageImage} alt="Hình" className="max-h-56 my-1" />}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 pl-5">
+                  {(q.options || []).map((o, oi) => (
+                    <div key={oi}><b>{String.fromCharCode(65 + oi)}.</b> {o}</div>
                   ))}
                 </div>
               </div>
-            )}
+            ))}
           </div>
         </div>
       );
