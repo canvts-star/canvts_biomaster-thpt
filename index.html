@@ -1,1257 +1,2823 @@
-<!DOCTYPE html>
-<html lang="vi">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BioMaster THPT - Chuyên Sâu Sinh Học - Thầy Trương Trung Can</title>
-  <!-- Tailwind CSS -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <!-- React & ReactDOM 18 -->
-  <script crossorigin="anonymous" src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
-  <script crossorigin="anonymous" src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
-  <!-- Babel cho JSX -->
-  <script crossorigin="anonymous" src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
-  <!-- Thư viện đọc PDF.js & Mammoth.js (.docx) -->
-  <script crossorigin="anonymous" src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-  <script crossorigin="anonymous" src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
-  <!-- Thư viện JSZip đọc trực tiếp XML trong file .docx -->
-  <script crossorigin="anonymous" src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-  <!-- Thư viện OCR Tesseract.js -->
-  <script crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-  <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
-    body { font-family: 'Inter', sans-serif; }
-    @media print {
-      body { background: white !important; color: black !important; }
-      .print\:hidden { display: none !important; }
-    }
-  </style>
-</head>
-<body class="bg-slate-50 text-slate-800 antialiased min-h-screen flex flex-col">
-  <div id="root" class="flex-1 flex flex-col"></div>
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { initializeApp } from 'firebase/app';
+import { 
+  getAuth, 
+  signInAnonymously, 
+  signInWithCustomToken, 
+  onAuthStateChanged 
+} from 'firebase/auth';
+import { 
+  getFirestore, 
+  collection, 
+  doc, 
+  setDoc, 
+  addDoc, 
+  updateDoc, 
+  deleteDoc, 
+  onSnapshot,
+  writeBatch
+} from 'firebase/firestore';
+import {
+  BookOpen,
+  GraduationCap,
+  FileText,
+  Sparkles,
+  CheckCircle2,
+  XCircle,
+  Clock,
+  Users,
+  Search,
+  Plus,
+  Trash2,
+  Edit3,
+  Upload,
+  Download,
+  Play,
+  Award,
+  Calculator,
+  BookMarked,
+  Layers,
+  Filter,
+  ChevronRight,
+  ChevronLeft,
+  AlertCircle,
+  Check,
+  RefreshCw,
+  ShieldCheck,
+  UserCheck,
+  Copy,
+  Save,
+  Eye,
+  ListChecks,
+  HelpCircle,
+  Dna,
+  Microscope,
+  Leaf,
+  BarChart3,
+  X
+} from 'lucide-react';
 
-  <script type="text/babel">
-    const { useState, useEffect, useMemo, useCallback, Component } = React;
-
-    class ErrorBoundary extends Component {
-      constructor(props) {
-        super(props);
-        this.state = { hasError: false, errorMessage: '' };
-      }
-      static getDerivedStateFromError(error) {
-        return { hasError: true, errorMessage: error?.message || 'Lỗi hiển thị giao diện.' };
-      }
-      render() {
-        if (this.state.hasError) {
-          return (
-            <div className="p-8 max-w-lg mx-auto my-10 bg-rose-50 border border-rose-300 rounded-2xl text-center space-y-3">
-              <h2 className="text-lg font-bold text-rose-800">Đã xảy ra sự cố hiển thị</h2>
-              <p className="text-xs text-rose-600 font-mono">{this.state.errorMessage}</p>
-              <button
-                onClick={() => this.setState({ hasError: false, errorMessage: '' })}
-                className="px-4 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold"
-              >
-                Khôi Phục Ứng Dụng
-              </button>
-            </div>
-          );
-        }
-        return this.props.children;
-      }
-    }
-
-    if (window.pdfjsLib && window.pdfjsLib.GlobalWorkerOptions) {
-      window.pdfjsLib.GlobalWorkerOptions.workerSrc =
-        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-    }
-
-    function cleanVietnameseUnicode(str) {
-      if (!str) return '';
-      return String(str)
-        .normalize('NFC')
-        .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFD]/g, '')
-        .replace(/\u00A0/g, ' ')
-        .replace(/[ \t]+/g, ' ');
-    }
-
-    function isRedOrHighlightHex(hexStr) {
-      if (!hexStr) return false;
-      const clean = String(hexStr).replace(/[^0-9A-Fa-f]/g, '').toUpperCase();
-      if (clean.length !== 6) return false;
-      if (['000000', 'FFFFFF', 'AUTO', '111111', '222222', '333333', '444444'].includes(clean)) return false;
-      const r = parseInt(clean.slice(0, 2), 16);
-      const g = parseInt(clean.slice(2, 4), 16);
-      const b = parseInt(clean.slice(4, 6), 16);
-      if (r >= 130 && r > g + 45 && r > b + 45) return true;
-      if (b >= 140 && b > r + 50 && b > g + 30) return true;
-      return false;
-    }
-
-    async function extractTextFromPdfFile(file, onProgress) {
-      try {
-        const arrayBuffer = await file.arrayBuffer();
-        if (!window.pdfjsLib) return { text: '', pageImages: {} };
-        const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-        let fullText = '';
-        const pageImages = {};
-
-        for (let p = 1; p <= pdf.numPages; p++) {
-          const page = await pdf.getPage(p);
-          const content = await page.getTextContent();
-          const ops = await page.getOperatorList();
-
-          let hasGraphicsOrTable = false;
-          const redOrUnderlineYCoords = [];
-
-          if (ops && Array.isArray(ops.fnArray) && window.pdfjsLib.OPS) {
-            const OPS = window.pdfjsLib.OPS;
-            const imgOps = [OPS.paintImageXObject, OPS.paintInlineImageXObject, OPS.paintJpegXObject, OPS.paintImageMaskXObject];
-            let curIsRed = false;
-            let curY = 0;
-
-            for (let k = 0; k < ops.fnArray.length; k++) {
-              const fn = ops.fnArray[k];
-              const args = ops.argsArray[k] || [];
-              if (imgOps.includes(fn)) hasGraphicsOrTable = true;
-
-              if (fn === OPS.setFillRGBColor || fn === OPS.setStrokeRGBColor) {
-                const [r, g, b] = args;
-                const r255 = r <= 1 ? Math.round(r * 255) : r;
-                const g255 = g <= 1 ? Math.round(g * 255) : g;
-                const b255 = b <= 1 ? Math.round(b * 255) : b;
-                curIsRed = (r255 >= 130 && r255 > g255 + 45 && r255 > b255 + 45);
-              } else if (fn === OPS.setTextMatrix && args.length >= 6) {
-                curY = args[5];
-              } else if ((fn === OPS.showText || fn === OPS.showSpacedText) && curIsRed) {
-                redOrUnderlineYCoords.push(curY);
-              }
-            }
-          }
-
-          const sortedItems = [...content.items].sort((a, b) => {
-            const yDiff = Math.abs(b.transform[5] - a.transform[5]);
-            if (yDiff > 5) return b.transform[5] - a.transform[5];
-            return a.transform[4] - b.transform[4];
-          });
-
-          const lines = [];
-          let currentLine = [];
-          let lastY = null;
-          sortedItems.forEach(item => {
-            const y = item.transform[5];
-            if (lastY !== null && Math.abs(y - lastY) > 6) {
-              lines.push(currentLine.join(' '));
-              currentLine = [];
-            }
-            const isMarkedY = redOrUnderlineYCoords.some(ry => Math.abs(ry - y) < 6);
-            const strVal = isMarkedY && /^[A-D][\.\:\)]/.test(item.str.trim()) ? `[[ANS_MARK]]${item.str}` : item.str;
-            currentLine.push(strVal);
-            lastY = y;
-          });
-          if (currentLine.length > 0) lines.push(currentLine.join(' '));
-
-          let pageText = cleanVietnameseUnicode(lines.join('\n')).trim();
-          if (hasGraphicsOrTable || pageText.length < 200) {
-            if (onProgress) onProgress(`Đang trích xuất dữ liệu Trang ${p}/${pdf.numPages}...`);
-            const viewport = page.getViewport({ scale: 1.8 });
-            const canvas = document.createElement('canvas');
-            canvas.width = viewport.width;
-            canvas.height = viewport.height;
-            const ctx = canvas.getContext('2d');
-            await page.render({ canvasContext: ctx, viewport }).promise;
-            if (hasGraphicsOrTable) pageImages[p] = canvas.toDataURL('image/png');
-          }
-          fullText += `\n[[PAGE_${p}]]\n` + pageText;
-        }
-        return { text: fullText.trim(), pageImages };
-      } catch (err) {
-        console.error('Lỗi đọc PDF:', err);
-        return { text: '', pageImages: {} };
-      }
-    }
-
-    async function extractTextFromDocxFile(file) {
-      try {
-        const arrayBuffer = await file.arrayBuffer();
-        let xmlExtractedText = '';
-        const answerHints = {};
-        if (window.JSZip) {
-          try {
-            const zip = await window.JSZip.loadAsync(arrayBuffer);
-            const docXmlStr = await zip.file('word/document.xml')?.async('string');
-            if (docXmlStr) {
-              const xmlDoc = new DOMParser().parseFromString(docXmlStr, 'application/xml');
-              const paragraphs = Array.from(xmlDoc.getElementsByTagName('w:p'));
-              const pLines = [];
-              paragraphs.forEach(p => {
-                const runs = Array.from(p.getElementsByTagName('w:r'));
-                let lineStr = '';
-                runs.forEach(r => {
-                  const rPr = r.getElementsByTagName('w:rPr')[0];
-                  let isMarked = false;
-                  if (rPr) {
-                    const cEl = rPr.getElementsByTagName('w:color')[0];
-                    const uEl = rPr.getElementsByTagName('w:u')[0];
-                    const cVal = cEl?.getAttribute('w:val') || cEl?.getAttribute('val');
-                    if ((cVal && isRedOrHighlightHex(cVal)) || uEl) isMarked = true;
-                  }
-                  const tNodes = Array.from(r.getElementsByTagName('w:t'));
-                  const rText = tNodes.map(t => t.textContent || '').join('');
-                  if (rText) lineStr += isMarked ? `[[ANS_MARK]]${rText}` : rText;
-                });
-                if (lineStr.trim()) pLines.push(lineStr);
-              });
-              xmlExtractedText = cleanVietnameseUnicode(pLines.join('\n'));
-            }
-          } catch (e) {}
-        }
-        return { text: xmlExtractedText, richBlocks: {}, answerHints };
-      } catch (err) {
-        return { text: '', richBlocks: {}, answerHints: {} };
-      }
-    }
-
-    function extractAnswerKeyFromRawText(rawText, preDetectedMap = {}) {
-      const ansMap = { ...preDetectedMap };
-      if (!rawText) return ansMap;
-      const clean = cleanVietnameseUnicode(rawText).replace(/\[\[ANS_MARK\]\]/g, '');
-      const pairRegex = /(?:^|\s|\||\(|\b)(?:Câu|Q)?\s*(\d{1,2})\s*(?:[\.:\-\)\/\s])\s*([A-D])(?=\s|$|\||,|;|\)|\.|\b)/gi;
-      let m;
-      while ((m = pairRegex.exec(clean)) !== null) {
-        const qNum = parseInt(m[1], 10);
-        if (qNum >= 1 && qNum <= 60 && !ansMap[qNum]) ansMap[qNum] = m[2].toUpperCase();
-      }
-      return ansMap;
-    }
-
-    // TÍCH HỢP GEMINI AI API ĐỂ TẠO ĐỀ & TẠO ĐỀ TƯƠNG TỰ CHÍNH XÁC DỰA TRÊN NGUỒN AI VÀ GROUNDING
-    async function generateAiSimilarExamFromGemini(rawText, grade, topic, mode = 'similar') {
-      const systemPrompt = `Bạn là trợ lý AI chuyên gia biên soạn đề thi Sinh học THPT chuẩn chương trình GDPT 2018 (Kết nối tri thức). Nhiệm vụ của bạn là phân tích đề gốc được cung cấp, sau đó tạo ra một bộ đề thi trắc nghiệm hoàn chỉnh tương tự hoặc mới hoàn toàn dựa trên nguồn kiến thức chuẩn xác từ Gemini AI.`;
-      const userPrompt = `Đề gốc/Nội dung nguồn:\n${rawText.slice(0, 5000)}\n\nYêu cầu: Hãy trích xuất hoặc biên soạn ${mode === 'similar' ? 'các câu hỏi tương tự với số liệu/biến thể mới dựa trên nguồn Gemini AI Grounding' : 'đúng các câu hỏi từ đề gốc'}, bao gồm nội dung câu hỏi, 4 phương án A, B, C, D, đáp án đúng (0 cho A, 1 cho B, 2 cho C, 3 cho D) và giải thích chi tiết. Trả về ĐÚNG định dạng JSON Array chứa các object: [{"question": "...", "options": ["...", "...", "...", "..."], "correct": 0, "explanation": "..."}]`;
-
-      const payload = {
-        contents: [{ parts: [{ text: userPrompt }] }],
-        tools: [{ "google_search": {} }],
-        systemInstruction: { parts: [{ text: systemPrompt }] },
-        generationConfig: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: "ARRAY",
-            items: {
-              type: "OBJECT",
-              properties: {
-                question: { type: "STRING" },
-                options: { type: "ARRAY", items: { type: "STRING" } },
-                correct: { type: "INTEGER" },
-                explanation: { type: "STRING" }
-              },
-              propertyOrdering: ["question", "options", "correct", "explanation"]
-            }
-          }
-        }
-      };
-
-      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=`;
-      for (let attempt = 0; attempt < 3; attempt++) {
-        try {
-          const res = await fetch(apiUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-          });
-          const result = await res.json();
-          const candidate = result.candidates?.[0];
-          if (candidate && candidate.content?.parts?.[0]?.text) {
-            const parsed = JSON.parse(candidate.content.parts[0].text);
-            if (Array.isArray(parsed) && parsed.length > 0) {
-              return parsed.map((item, idx) => ({
-                id: `AI_${mode === 'exact' ? 'EXACT' : 'SIM'}_${Date.now()}_${idx + 1}`,
-                subject: 'Sinh học',
-                grade,
-                topic,
-                type: 'mcq',
-                question: item.question,
-                options: item.options || ['A', 'B', 'C', 'D'],
-                correct: typeof item.correct === 'number' ? item.correct : 0,
-                explanation: `[Gemini AI Grounding] ${item.explanation || 'Đáp án chuẩn xác theo chương trình Sinh học THPT.'}`
-              }));
-            }
-          }
-        } catch (err) {
-          await new Promise(r => setTimeout(r, Math.pow(2, attempt) * 1000));
-        }
-      }
-      return null;
-    }
-
-    function parseAndGenerateSimilarFromText(rawText, grade, topic, options = {}) {
-      const { richBlocks = {}, pageImages = {}, answerHints = {}, mode = 'similar' } = options;
-      const normalized = cleanVietnameseUnicode(rawText);
-      const answerKeyMap = extractAnswerKeyFromRawText(normalized, answerHints);
-      const bodyOnly = normalized.split(/\n\s*(?:BẢNG\s+ĐÁP\s+ÁN|ĐÁP\s+ÁN)\b/i)[0];
-
-      const regexSplit = /(?:^|\n)\s*(?:Câu|Question)\s*(\d{1,2})\s*[\.:\)]\s*/gi;
-      const matches = [];
-      let m;
-      while ((m = regexSplit.exec(bodyOnly)) !== null) {
-        matches.push({ qNum: parseInt(m[1], 10), start: m.index, contentStart: m.index + m[0].length });
-      }
-
-      const results = [];
-      for (let idx = 0; idx < matches.length; idx++) {
-        const curMatch = matches[idx];
-        const nextMatch = matches[idx + 1];
-        const rawBlock = bodyOnly.slice(curMatch.contentStart, nextMatch ? nextMatch.start : bodyOnly.length).trim();
-        if (!rawBlock) continue;
-
-        const cleanedBlock = rawBlock.replace(/\[\[RICH_BLOCK_(\d+)\]\]/g, '').replace(/\[\[PAGE_\d+\]\]/g, '').trim();
-
-        const findMarkerPos = (letter, searchFrom) => {
-          const re = new RegExp(`(?:^|\\n|\\s)(?:\\[\\[ANS_MARK\\]\\]\\s*)*(\\*?)${letter}\\s*(?:\\[\\[ANS_MARK\\]\\]\\s*)*[\\.:\\)]\\s*(?:\\[\\[ANS_MARK\\]\\]\\s*)*`, 'g');
-          re.lastIndex = searchFrom;
-          const found = re.exec(cleanedBlock);
-          return found ? { start: found.index, contentStart: found.index + found[0].length, markerMarked: found[0].includes('[[ANS_MARK]]') || found[1] === '*' } : null;
-        };
-
-        const posA = findMarkerPos('A', 0);
-        const posB = posA ? findMarkerPos('B', posA.contentStart) : null;
-        const posC = posB ? findMarkerPos('C', posB.contentStart) : null;
-        const posD = posC ? findMarkerPos('D', posC.contentStart) : null;
-        const qNum = curMatch.qNum;
-
-        if (posA && posB && posC && posD) {
-          const questionStemRaw = cleanedBlock.slice(0, posA.start).replace(/\[\[ANS_MARK\]\]/g, '').trim();
-          const rawOpts = [
-            cleanedBlock.slice(posA.contentStart, posB.start),
-            cleanedBlock.slice(posB.contentStart, posC.start),
-            cleanedBlock.slice(posC.contentStart, posD.start),
-            cleanedBlock.slice(posD.contentStart)
-          ];
-
-          let markedCorrectIdx = -1;
-          const markerFlags = [posA.markerMarked, posB.markerMarked, posC.markerMarked, posD.markerMarked];
-          const cleanOpts = rawOpts.map((optStr, oIdx) => {
-            if (markerFlags[oIdx] || optStr.includes('[[ANS_MARK]]')) markedCorrectIdx = oIdx;
-            return optStr.replace(/\[\[ANS_MARK\]\]/g, '').replace(/\s+/g, ' ').trim();
-          });
-
-          let finalQuestionText = questionStemRaw;
-          if (mode === 'similar') {
-            finalQuestionText = finalQuestionText.replace(/\b(\d+)\b/g, (numStr) => {
-              const v = parseInt(numStr, 10);
-              if (v >= 12 && v <= 2000 && v !== 2018 && v !== 2025 && v !== 2026) return String(v * 2);
-              return numStr;
-            });
-          }
-
-          let detectedOrigCorrect = markedCorrectIdx >= 0 ? markedCorrectIdx : (answerKeyMap[qNum] ? ['A', 'B', 'C', 'D'].indexOf(answerKeyMap[qNum]) : 0);
-          const originalCorrectText = cleanOpts[detectedOrigCorrect];
-          let finalOptions = [...cleanOpts];
-          let finalCorrect = detectedOrigCorrect;
-
-          if (mode === 'similar') {
-            finalOptions = [...cleanOpts].sort(() => Math.random() - 0.5);
-            finalCorrect = Math.max(0, finalOptions.indexOf(originalCorrectText));
-          }
-
-          results.push({
-            id: `${mode === 'exact' ? 'EXACT' : 'SIM'}_${Date.now()}_${idx + 1}`,
-            subject: 'Sinh học',
-            grade,
-            topic,
-            type: 'mcq',
-            question: finalQuestionText,
-            options: finalOptions,
-            correct: finalCorrect,
-            explanation: `[Đề sinh học] Đáp án đúng: ${String.fromCharCode(65 + finalCorrect)}.`
-          });
-        }
-      }
-      return results;
-    }
-
-    function downloadExamAsWordDoc(examTitle, examCode, teacherName, timeAllowed, grade, questionsList) {
-      const questionsHtml = questionsList.map((q, idx) => {
-        const optsHtml = (q.options || []).map((opt, oi) =>
-          `<div style="margin-left:20px;margin-top:3px;"><b>${String.fromCharCode(65 + oi)}.</b> ${opt}</div>`
-        ).join('');
-        return `<div style="margin-bottom:12px;"><div><b>Câu ${idx + 1}:</b> ${q.question}</div>${optsHtml}</div>`;
-      }).join('');
-
-      const keyCells = questionsList.map((q, i) => {
-        const ans = q.type === 'mcq' ? String.fromCharCode(65 + (q.correct || 0)) : 'Đ/S';
-        return `<td style="border:1px solid #000;padding:4px;text-align:center;"><b>${i + 1}</b><br/>${ans}</td>`;
-      }).join('');
-
-      const fullHtml = `\uFEFF
-        <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
-        <head><meta http-equiv="Content-Type" content="text/html; charset=utf-8"><title>${examTitle}</title></head>
-        <body style="font-family:'Times New Roman',serif;font-size:13pt;line-height:1.4;">
-          <table style="width:100%;border-bottom:2px solid #000;margin-bottom:16px;">
-            <tr>
-              <td style="text-align:center;width:45%;"><b>SỞ GIÁO DỤC & ĐÀO TẠO</b><br/><b>${teacherName.toUpperCase()}</b></td>
-              <td style="text-align:center;width:55%;"><b>${examTitle.toUpperCase()}</b><br/>Môn: Sinh học - Khối ${grade}<br/>Thời gian: ${timeAllowed} phút | Mã đề: <b>${examCode}</b></td>
-            </tr>
-          </table>
-          ${questionsHtml}
-          <h4 style="margin-top:20px;">BẢNG ĐÁP ÁN MÃ ĐỀ ${examCode}</h4>
-          <table style="border-collapse:collapse;width:100%;"><tr>${keyCells}</tr></table>
-        </body>
-        </html>
-      `;
-
-      const blob = new Blob([fullHtml], { type: 'application/msword;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `De_Sinh_Hoc_Khoi_${grade}_Ma_${examCode}.doc`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    }
-
-    const BIOLOGY_TOPICS = {
-      '10': ['Sinh học tế bào & Thành phần hóa học', 'Chuyển hóa vật chất & Năng lượng', 'Phân bào & Sinh học vi sinh vật'],
-      '11': ['Trao đổi chất & Chuyển hóa năng lượng', 'Cảm ứng & Điều hòa hoạt động', 'Sinh trưởng, phát triển & Sinh sản'],
-      '12': ['Di truyền phân tử & Cơ chế biến dị', 'Di truyền Nhiễm sắc thể & Quy luật Mendel', 'Di truyền quần thể & Công nghệ Gen', 'Tiến hóa & Học thuyết hiện đại', 'Sinh thái học & Bảo tồn môi trường']
+// ==========================================
+// 1. CẤU HÌNH FIREBASE & KHỞI TẠO AN TOÀN
+// ==========================================
+const firebaseConfig = typeof __firebase_config !== 'undefined' 
+  ? JSON.parse(__firebase_config) 
+  : {
+      apiKey: "demo-key",
+      authDomain: "demo.firebaseapp.com",
+      projectId: "demo-project",
+      storageBucket: "demo.appspot.com",
+      messagingSenderId: "123456",
+      appId: "1:123456:web:abcdef"
     };
 
-    function buildInitialQuestions() {
-      const bank = [];
-      Object.entries(BIOLOGY_TOPICS).forEach(([grade, topicsList]) => {
-        topicsList.forEach((topic, tIdx) => {
-          for (let i = 1; i <= 6; i++) {
-            bank.push({
-              id: `BIO_${grade}_T${tIdx + 1}_Q${i}`,
-              subject: 'Sinh học',
-              grade,
-              topic,
-              type: 'mcq',
-              question: `[Sinh học ${grade} - ${topic}] Phát biểu nào sau đây là chính xác khi nghiên cứu về quá trình sinh học này (câu số ${i})?`,
-              options: [
-                `Đặc điểm đúng chuẩn chương trình Sinh học THPT (GDPT 2018)`,
-                `Phát biểu sai lệch về nguyên lý hoạt động của sinh vật`,
-                `Quá trình diễn ra tự phát không chịu sự kiểm soát của hệ thống`,
-                `Chỉ xuất hiện trong điều kiện nhân tạo phòng thí nghiệm`
-              ],
-              correct: 0,
-              explanation: `Hướng dẫn giải chi tiết cho chuyên đề ${topic} (Sinh học lớp ${grade}).`
-            });
-          }
-        });
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'biomaster-2026-default';
+
+// ==========================================
+// 2. DỮ LIỆU KHỞI TẠO CHUẨN SINH HỌC 12 (GDPT 2018)
+// ==========================================
+const TOPICS_12 = [
+  { id: 'cd1', grade: '12', name: 'Chủ đề 1: Cơ chế di truyền và biến dị cấp độ phân tử', short: 'Di truyền phân tử' },
+  { id: 'cd2', grade: '12', name: 'Chủ đề 2: Cơ chế di truyền và biến dị cấp độ tế bào', short: 'Di truyền tế bào' },
+  { id: 'cd3', grade: '12', name: 'Chủ đề 3: Quy luật di truyền (Mendel, Tương tác, Liên kết, Hoán vị)', short: 'Quy luật di truyền' },
+  { id: 'cd4', grade: '12', name: 'Chủ đề 4: Di truyền học quần thể và Di truyền học người', short: 'DT Quần thể & Người' },
+  { id: 'cd5', grade: '12', name: 'Chủ đề 5: Bằng chứng tiến hóa và Các cơ chế tiến hóa', short: 'Tiến hóa' },
+  { id: 'cd6', grade: '12', name: 'Chủ đề 6: Sinh thái học cá thể, quần thể, quần xã và hệ sinh thái', short: 'Sinh thái học' },
+  { id: 'cd11', grade: '11', name: 'Sinh học 11: Trao đổi chất, Chuyển hóa năng lượng & Cảm ứng ở sinh vật', short: 'Sinh học 11' },
+  { id: 'cd10', grade: '10', name: 'Sinh học 10: Sinh học tế bào & Vi sinh vật', short: 'Sinh học 10' },
+];
+
+const INITIAL_QUESTIONS = [
+  // CHỦ ĐỀ 1: DI TRUYỀN PHÂN TỬ
+  {
+    id: 'q_init_1',
+    grade: '12',
+    topicId: 'cd1',
+    type: 'MCQ', // Trắc nghiệm 4 lựa chọn
+    source: 'Đề minh họa TNTHPT 2025',
+    level: 'Thông hiểu',
+    content: 'Trong quá trình tái bản DNA ở sinh vật nhân sơ, enzyme nào sau đây có vai trò tổng hợp đoạn mồi RNA cung cấp đầu 3\'-OH tự do cho DNA polymerase hoạt động?',
+    options: ['DNA polymerase III', 'RNA polymerase (Primase)', 'DNA ligase', 'Helicase'],
+    correctAnswer: 'B',
+    explanation: 'Enzyme RNA polymerase (hay Primase) tổng hợp đoạn mồi RNA ngắn có đầu 3\'-OH tự do để DNA polymerase có thể gắn nucleotide tiếp theo.'
+  },
+  {
+    id: 'q_init_2',
+    grade: '12',
+    topicId: 'cd1',
+    type: 'MCQ',
+    source: 'Đề chính thức TNTHPT 2024',
+    level: 'Vận dụng',
+    content: 'Một gene ở sinh vật nhân sơ có chiều dài 408 nm và có 3120 liên kết hydrogen. Số lượng nucleotide loại Guanine (G) của gene này là bao nhiêu?',
+    options: ['480', '720', '960', '1200'],
+    correctAnswer: 'B',
+    explanation: 'Tổng số nucleotide N = (2 × 4080) / 3,4 = 2400 nu. Ta có hệ phương trình: 2A + 2G = 2400 và 2A + 3G = 3120 => G = 3120 - 2400 = 720.'
+  },
+  {
+    id: 'q_init_3',
+    grade: '12',
+    topicId: 'cd1',
+    type: 'TF', // Trắc nghiệm Đúng/Sai
+    source: 'Đề minh họa TNTHPT 2026',
+    level: 'Vận dụng cao',
+    content: 'Khi nghiên cứu về cơ chế điều hòa biểu hiện của Operon Lac ở vi khuẩn E. coli theo mô hình của Jacob và Monod, một nhóm học sinh đưa ra các nhận định sau. Hãy xác định mỗi nhận định là Đúng hay Sai:',
+    subItems: [
+      { id: 'a', text: 'Gene điều hòa lacI nằm trong thành phần cấu trúc của Operon Lac và chịu sự điều khiển trực tiếp của vùng khởi động P.', answer: false },
+      { id: 'b', text: 'Khi môi trường không có lactose, protein ức chế liên kết với vùng vận hành (O) ngăn cản enzyme RNA polymerase phiên mã các gene cấu trúc.', answer: true },
+      { id: 'c', text: 'Nếu xảy ra đột biến làm mất vùng vận hành (O) thì các gene cấu trúc lacZ, lacY, lacA sẽ phiên mã liên tục ngay cả khi không có lactose.', answer: true },
+      { id: 'd', text: 'Khi môi trường có lactose, allolactose đóng vai trò là chất cảm ứng làm biến đổi cấu hình không gian của protein ức chế.', answer: true }
+    ],
+    explanation: 'a) Sai vì gene lacI nằm ngoài Operon Lac và có vùng P riêng. b, c, d) Đúng theo cơ chế điều hòa Operon Lac.'
+  },
+  {
+    id: 'q_init_4',
+    grade: '12',
+    topicId: 'cd1',
+    type: 'SHORT', // Trả lời ngắn
+    source: 'Đề phát triển TNTHPT 2026',
+    level: 'Vận dụng',
+    content: 'Một phân tử mRNA trưởng thành ở sinh vật nhân sơ có chiều dài 510 nm tham gia dịch mã. Nếu có 5 ribosome cùng trượt qua phân tử mRNA này một lần thì tổng số amino acid môi trường cung cấp cho quá trình dịch mã là bao nhiêu? (Biết mỗi ribosome trượt qua tổng hợp 1 chuỗi polypeptide hoàn chỉnh).',
+    correctAnswer: '2495',
+    explanation: 'Số nu của mRNA = 5100 / 3,4 = 1500 nu => Số bộ ba = 1500 / 3 = 500 codon. Mỗi chuỗi polypeptide cần (500 - 1) = 499 amino acid môi trường cung cấp. Với 5 ribosome: 5 × 499 = 2495 amino acid.'
+  },
+
+  // CHỦ ĐỀ 2: DI TRUYỀN TẾ BÀO
+  {
+    id: 'q_init_5',
+    grade: '12',
+    topicId: 'cd2',
+    type: 'MCQ',
+    source: 'Đề chính thức TNTHPT 2023',
+    level: 'Nhận biết',
+    content: 'Dạng đột biến cấu trúc nhiễm sắc thể nào sau đây làm tăng số lượng bản sao của một gene trên nhiễm sắc thể, tạo điều kiện cho đột biến gene tạo nên gene mới?',
+    options: ['Mất đoạn', 'Lặp đoạn', 'Đảo đoạn', 'Chuyển đoạn không tương hỗ'],
+    correctAnswer: 'B',
+    explanation: 'Lặp đoạn NST làm tăng số lượng bản sao của gene trên NST, tạo nguyên liệu cho quá trình tiến hóa thông qua đột biến gene.'
+  },
+  {
+    id: 'q_init_6',
+    grade: '12',
+    topicId: 'cd2',
+    type: 'TF',
+    source: 'Đề minh họa TNTHPT 2025',
+    level: 'Vận dụng',
+    content: 'Ở một loài thực vật lưỡng bội (2n = 24), người ta phát hiện các thể đột biến số lượng nhiễm sắc thể khác nhau. Xét tính đúng/sai của các phát biểu sau:',
+    subItems: [
+      { id: 'a', text: 'Thể ba nhiễm (2n + 1) của loài này có số lượng nhiễm sắc thể trong tế bào sinh dưỡng là 25.', answer: true },
+      { id: 'b', text: 'Thể tam bội (3n) có khả năng sinh sản hữu tính bình thường tạo hạt nhiều và quả to.', answer: false },
+      { id: 'c', text: 'Cơ chế hình thành thể tứ bội (4n) có thể do sự không phân li của toàn bộ bộ nhiễm sắc thể trong lần nguyên phân đầu tiên của hợp tử 2n.', answer: true },
+      { id: 'd', text: 'Các thể lệch bội thường gây mất cân bằng hệ gene nên thường giảm sức sống hoặc gây chết.', answer: true }
+    ],
+    explanation: 'b) Sai vì thể tam bội (3n) có bộ NST lẻ nên rối loạn giảm phân, thường bất thụ (tạo quả không hạt).'
+  },
+
+  // CHỦ ĐỀ 3: QUY LUẬT DI TRUYỀN
+  {
+    id: 'q_init_7',
+    grade: '12',
+    topicId: 'cd3',
+    type: 'MCQ',
+    source: 'Đề chính thức TNTHPT 2025',
+    level: 'Vận dụng',
+    content: 'Ở một loài thực vật, xét 2 cặp gene phân li độc lập quy định 2 tính trạng, các allele trội là trội hoàn toàn. Cho cây dị hợp về 2 cặp gene tự thụ phấn, thu được F1. Theo lí thuyết, tỉ lệ cá thể ở F1 có kiểu hình trội về cả 2 tính trạng là:',
+    options: ['9/16', '3/16', '6/16', '1/16'],
+    correctAnswer: 'A',
+    explanation: 'Phép lai AaBb × AaBb cho tỉ lệ kiểu hình trội cả 2 tính trạng (A-B-) = 3/4 × 3/4 = 9/16.'
+  },
+  {
+    id: 'q_init_8',
+    grade: '12',
+    topicId: 'cd3',
+    type: 'SHORT',
+    source: 'Đề minh họa TNTHPT 2026',
+    level: 'Vận dụng cao',
+    content: 'Ở ruồi giấm, xét phép lai P: ♀ AB/ab × ♂ AB/ab. Biết mỗi gene quy định một tính trạng, trội hoàn toàn và tần số hoán vị gene ở giới cái là 20% (ruồi giấm đực không có hoán vị gene). Theo lí thuyết, tỉ lệ kiểu hình lặn về cả hai tính trạng (ab/ab) ở đời F1 chiếm tỉ lệ bao nhiêu phần trăm (%)?',
+    correctAnswer: '20',
+    explanation: 'Ruồi cái f = 20% => giao tử ab = (1 - 0,2)/2 = 0,4. Ruồi đực liên kết hoàn toàn => giao tử ab = 0,5. Tỉ lệ ab/ab = 0,4 × 0,5 = 0,20 = 20%.'
+  },
+
+  // CHỦ ĐỀ 4: DI TRUYỀN QUẦN THỂ & NGƯỜI
+  {
+    id: 'q_init_9',
+    grade: '12',
+    topicId: 'cd4',
+    type: 'MCQ',
+    source: 'Đề chính thức TNTHPT 2024',
+    level: 'Thông hiểu',
+    content: 'Một quần thể thực vật tự thụ phấn có cấu trúc di truyền ở thế hệ xuất phát (P) là 0,4AA : 0,4Aa : 0,2aa. Theo lí thuyết, tỉ lệ kiểu gene dị hợp (Aa) ở thế hệ F2 là bao nhiêu?',
+    options: ['0,1', '0,2', '0,05', '0,4'],
+    correctAnswer: 'A',
+    explanation: 'Sau n thế hệ tự thụ phấn, tỉ lệ Aa = 0,4 × (1/2)^2 = 0,4 × 0,25 = 0,1.'
+  },
+  {
+    id: 'q_init_10',
+    grade: '12',
+    topicId: 'cd4',
+    type: 'SHORT',
+    source: 'Đề phát triển TNTHPT 2026',
+    level: 'Vận dụng',
+    content: 'Ở người, bệnh bạch tạng do allele lặn a nằm trên nhiễm sắc thể thường quy định, allele trội A quy định da bình thường. Một quần thể người đang ở trạng thái cân bằng di truyền có tỉ lệ người bị bệnh bạch tạng là 1%. Tần số allele a trong quần thể này là bao nhiêu? (Viết kết quả dưới dạng số thập phân).',
+    correctAnswer: '0.1',
+    explanation: 'Quần thể cân bằng di truyền có q^2 (aa) = 1% = 0,01 => Tần số allele a là q = √0,01 = 0,1.'
+  },
+
+  // CHỦ ĐỀ 5: TIẾN HÓA
+  {
+    id: 'q_init_11',
+    grade: '12',
+    topicId: 'cd5',
+    type: 'MCQ',
+    source: 'Đề chính thức TNTHPT 2025',
+    level: 'Nhận biết',
+    content: 'Theo thuyết tiến hóa tổng hợp hiện đại, nhân tố tiến hóa nào sau đây làm thay đổi tần số allele của quần thể một cách ngẫu nhiên, không theo một hướng xác định và có thể làm nghèo vốn gene của quần thể?',
+    options: ['Chọn lọc tự nhiên', 'Phiêu bạt di truyền (Các yếu tố ngẫu nhiên)', 'Đột biến', 'Giao phối không ngẫu nhiên'],
+    correctAnswer: 'B',
+    explanation: 'Phiêu bạt di truyền (yếu tố ngẫu nhiên) làm biến đổi tần số allele đột ngột, vô hướng và có thể loại bỏ hoàn toàn một allele nào đó khỏi quần thể.'
+  },
+
+  // CHỦ ĐỀ 6: SINH THÁI HỌC
+  {
+    id: 'q_init_12',
+    grade: '12',
+    topicId: 'cd6',
+    type: 'SHORT',
+    source: 'Đề minh họa TNTHPT 2025',
+    level: 'Vận dụng',
+    content: 'Trong một hệ sinh thái đồng cỏ, năng lượng tích lũy ở sinh vật sản xuất (cỏ) là 2,5 × 10^6 kcal, ở sinh vật tiêu thụ bậc 1 (châu chấu) là 2,0 × 10^5 kcal. Hiệu suất sinh thái giữa sinh vật tiêu thụ bậc 1 so với sinh vật sản xuất là bao nhiêu phần trăm (%)?',
+    correctAnswer: '8',
+    explanation: 'Hiệu suất sinh thái H = (2,0 × 10^5 / 2,5 × 10^6) × 100% = 8%.'
+  },
+
+  // SINH HỌC 11 & 10
+  {
+    id: 'q_init_13',
+    grade: '11',
+    topicId: 'cd11',
+    type: 'MCQ',
+    source: 'Ôn tập Sinh học 11 - GDPT 2018',
+    level: 'Thông hiểu',
+    content: 'Ở thực vật C4, giai đoạn cố định CO2 đầu tiên diễn ra ở tế bào mô giậu tạo ra sản phẩm ổn định đầu tiên là hợp chất có mấy carbon?',
+    options: ['3 carbon (APG)', '4 carbon (OAA)', '5 carbon (RuBP)', '6 carbon (Glucose)'],
+    correctAnswer: 'B',
+    explanation: 'Ở thực vật C4, chất nhận CO2 đầu tiên là PEP (3C) tạo ra sản phẩm đầu tiên là hợp chất 4 carbon: Oxaloacetic acid (OAA).'
+  },
+  {
+    id: 'q_init_14',
+    grade: '10',
+    topicId: 'cd10',
+    type: 'MCQ',
+    source: 'Ôn tập Sinh học 10 - GDPT 2018',
+    level: 'Nhận biết',
+    content: 'Bào quan nào sau đây trong tế bào nhân thực được ví như "nhà máy năng lượng" vì là nơi diễn ra quá trình hô hấp tế bào tạo ra phần lớn ATP?',
+    options: ['Lục lạp', 'Ti thể', 'Bộ máy Golgi', 'Lưới nội chất hạt'],
+    correctAnswer: 'B',
+    explanation: 'Ti thể là nơi diễn ra chu trình Krebs và chuỗi truyền electron hô hấp, tổng hợp phần lớn ATP cung cấp cho các hoạt động sống của tế bào.'
+  }
+];
+
+const INITIAL_EXAMS = [
+  {
+    id: 'exam_demo_2026',
+    title: 'Đề Thi Thử TNTHPT Môn Sinh Học 2026 - Đề Chuẩn Cấu Trúc Số 01',
+    grade: '12',
+    duration: 50, // phút
+    published: true,
+    createdAt: new Date().toISOString(),
+    description: 'Đề thi bám sát cấu trúc đề minh họa của Bộ GD&ĐT năm 2025-2026: gồm 3 phần (Nhiều lựa chọn, Đúng/Sai, Trả lời ngắn).',
+    questions: [
+      INITIAL_QUESTIONS[0],
+      INITIAL_QUESTIONS[1],
+      INITIAL_QUESTIONS[4],
+      INITIAL_QUESTIONS[6],
+      INITIAL_QUESTIONS[8],
+      INITIAL_QUESTIONS[10],
+      INITIAL_QUESTIONS[2], // TF
+      INITIAL_QUESTIONS[5], // TF
+      INITIAL_QUESTIONS[3], // SHORT
+      INITIAL_QUESTIONS[7], // SHORT
+      INITIAL_QUESTIONS[9], // SHORT
+      INITIAL_QUESTIONS[11] // SHORT
+    ]
+  }
+];
+
+const INITIAL_UTILITIES = [
+  // THUẬT NGỮ
+  {
+    id: 'ut_term_1',
+    category: 'term',
+    topic: 'Di truyền phân tử',
+    title: 'Operon Lac',
+    content: 'Cụm các gene cấu trúc (lacZ, lacY, lacA) có chung một cơ chế điều hòa phiên mã ở vi khuẩn E. coli, bao gồm vùng khởi động (P), vùng vận hành (O) và nhóm gene cấu trúc.'
+  },
+  {
+    id: 'ut_term_2',
+    category: 'term',
+    topic: 'Di truyền phân tử',
+    title: 'Mã di truyền (Genetic Code)',
+    content: 'Trình tự sắp xếp các nucleotide trong gene (hoặc mRNA) quy định trình tự sắp xếp các amino acid trong chuỗi polypeptide. Mã di truyền là mã bộ ba, có tính phổ biến, đặc hiệu và thoái hóa.'
+  },
+  {
+    id: 'ut_term_3',
+    category: 'term',
+    topic: 'Di truyền tế bào',
+    title: 'Đột biến lệch bội (Aneuploidy)',
+    content: 'Sự biến đổi số lượng nhiễm sắc thể xảy ra ở một hoặc một số cặp NST tương đồng (ví dụ: thể một 2n-1, thể ba 2n+1), thường do sự không phân li của NST trong giảm phân.'
+  },
+  {
+    id: 'ut_term_4',
+    category: 'term',
+    topic: 'Tiến hóa',
+    title: 'Phiêu bạt di truyền (Genetic Drift)',
+    content: 'Nhân tố tiến hóa làm thay đổi tần số allele và thành phần kiểu gene của quần thể một cách ngẫu nhiên, vô hướng, đặc biệt tác động mạnh lên các quần thể có kích thước nhỏ.'
+  },
+  {
+    id: 'ut_term_5',
+    category: 'term',
+    topic: 'Sinh thái học',
+    title: 'Ổ sinh thái (Ecological Niche)',
+    content: 'Một "không gian sinh thái" mà ở đó tất cả các nhân tố sinh thái của môi trường nằm trong giới hạn sinh thái cho phép loài đó tồn tại và phát triển lâu dài. Khác với "nơi ở" (địa điểm cư trú).'
+  },
+
+  // CÔNG THỨC
+  {
+    id: 'ut_form_1',
+    category: 'formula',
+    topic: 'Di truyền phân tử',
+    title: '1. Hệ công thức Cấu trúc DNA & Gene',
+    content: `• Tổng số nucleotide: N = 2A + 2G = (2 × L) / 3,4 (với L tính bằng Å; 1 nm = 10 Å)
+• Khối lượng phân tử DNA: M = N × 300 (đvC / amu)
+• Số chu kì xoắn: C = N / 20 = L / 34
+• Số liên kết Hydrogen: H = 2A + 3G = N + G
+• Số liên kết cộng hóa trị giữa các nu: HT = N - 2`
+  },
+  {
+    id: 'ut_form_2',
+    category: 'formula',
+    topic: 'Di truyền phân tử',
+    title: '2. Công thức Tái bản DNA, Phiên mã & Dịch mã',
+    content: `• Tái bản k lần từ 1 DNA:
+  - Số DNA con tạo ra = 2^k
+  - Số nu môi trường cung cấp: N_mt = N × (2^k - 1)
+  - Số liên kết H bị phá vỡ: H_pv = H × (2^k - 1)
+• Phiên mã k lần: rN_mt = (N / 2) × k
+• Dịch mã (1 ribosome trượt qua mRNA có rN nu):
+  - Số bộ ba (codon) = rN / 3
+  - Số amino acid môi trường cung cấp = (rN / 3) - 1
+  - Số amino acid trong chuỗi polypeptide hoàn chỉnh = (rN / 3) - 2`
+  },
+  {
+    id: 'ut_form_3',
+    category: 'formula',
+    topic: 'Quy luật di truyền',
+    title: '3. Công thức Hoán vị gene & Tính giao tử',
+    content: `• Xét cơ thể dị hợp 2 cặp gene có tần số hoán vị f (f ≤ 50%):
+  - Kiểu gene đồng hợp tử (AB/ab): Giao tử liên kết AB = ab = (1 - f)/2 ; Giao tử hoán vị Ab = aB = f/2
+  - Kiểu gene dị hợp tử (Ab/aB): Giao tử liên kết Ab = aB = (1 - f)/2 ; Giao tử hoán vị AB = ab = f/2
+• Tính nhanh tỉ lệ kiểu hình (P dị hợp 2 cặp gene, trội hoàn toàn):
+  - %A-B- = 50% + %aabb
+  - %A-bb = %aaB- = 25% - %aabb`
+  },
+  {
+    id: 'ut_form_4',
+    category: 'formula',
+    topic: 'DT Quần thể & Người',
+    title: '4. Công thức Di truyền Quần thể (Hardy-Weinberg)',
+    content: `• Quần thể tự thụ phấn qua n thế hệ từ P (x AA : y Aa : z aa):
+  - Aa ở Fn = y × (1/2)^n
+  - AA ở Fn = x + [y × (1 - (1/2)^n)] / 2
+  - aa ở Fn = z + [y × (1 - (1/2)^n)] / 2
+• Quần thể ngẫu phối cân bằng di truyền (p(A) + q(a) = 1):
+  - Cấu trúc di truyền: p² AA + 2pq Aa + q² aa = 1`
+  },
+  {
+    id: 'ut_form_5',
+    category: 'formula',
+    topic: 'Sinh thái học',
+    title: '5. Công thức Sinh thái học',
+    content: `• Mật độ cá thể quần thể: D = N / S (hoặc N / V)
+• Hiệu suất sinh thái: H = (Năng lượng bậc dinh dưỡng sau / Năng lượng bậc dinh dưỡng liền trước) × 100%`
+  },
+
+  // KHÁI NIỆM & BẢNG SO SÁNH
+  {
+    id: 'ut_conc_1',
+    category: 'concept',
+    topic: 'Di truyền phân tử',
+    title: 'So sánh Tái bản DNA và Phiên mã',
+    content: `• Tái bản DNA: Dùng cả 2 mạch của DNA làm khuôn; Enzyme chính là DNA polymerase; Nguyên liệu A, T, G, C; Cần đoạn mồi RNA; Diễn ra theo nguyên tắc bán bảo toàn.
+• Phiên mã: Chỉ dùng 1 mạch (mạch khuôn 3'->5') của gene làm khuôn; Enzyme chính là RNA polymerase; Nguyên liệu A, U, G, C; Không cần đoạn mồi.`
+  },
+  {
+    id: 'ut_conc_2',
+    category: 'concept',
+    topic: 'Tiến hóa',
+    title: 'Phân biệt Chọn lọc tự nhiên (CLTN) và Phiêu bạt di truyền',
+    content: `• Chọn lọc tự nhiên: Nhân tố tiến hóa CÓ HƯỚNG, quy định chiều hướng và nhịp điệu tiến hóa, giữ lại kiểu hình thích nghi.
+• Phiêu bạt di truyền: Nhân tố tiến hóa VÔ HƯỚNG, có thể loại bỏ cả allele có lợi và giữ lại allele có hại, tác động mạnh ở quần thể nhỏ.`
+  },
+  {
+    id: 'ut_conc_3',
+    category: 'concept',
+    topic: 'Sinh thái học',
+    title: 'Phân biệt Diễn thế nguyên sinh và Diễn thế thứ sinh',
+    content: `• Diễn thế nguyên sinh: Khởi đầu từ môi trường trống trơn chưa có sinh vật (đảo mới nổi, tro tàn núi lửa...) -> Kết quả hình thành quần xã đỉnh cực tương đối ổn định.
+• Diễn thế thứ sinh: Khởi đầu từ môi trường đã có quần xã sinh vật từng sống nhưng bị hủy diệt (cháy rừng, chặt phá rừng...) -> Có thể phục hồi hoặc suy thoái.`
+  }
+];
+
+// ==========================================
+// 3. HÀM GỌI GEMINI API VỚI EXPONENTIAL BACKOFF
+// ==========================================
+async function callGeminiAPI(prompt, systemInstruction = "", jsonSchema = null) {
+  const apiKey = ""; // Môi trường runtime tự động cung cấp khóa API
+  const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
+
+  const payload = {
+    contents: [{ parts: [{ text: prompt }] }],
+  };
+
+  if (systemInstruction) {
+    payload.systemInstruction = { parts: [{ text: systemInstruction }] };
+  }
+
+  if (jsonSchema) {
+    payload.generationConfig = {
+      responseMimeType: "application/json",
+      responseSchema: jsonSchema
+    };
+  }
+
+  let delay = 1000;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
       });
-      return bank;
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!text) throw new Error("Empty response from Gemini");
+      return jsonSchema ? JSON.parse(text) : text;
+    } catch (error) {
+      if (attempt === 4) throw error;
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      delay *= 2;
     }
+  }
+}
 
-    function App() {
-      const [activeTab, setActiveTab] = useState('quiz');
-      const [questions, setQuestions] = useState(() => buildInitialQuestions());
-      const [customExams, setCustomExams] = useState([]);
-      const [selectedGrade, setSelectedGrade] = useState('12');
-      const [isTeacherAuth, setIsTeacherAuth] = useState(false);
-      const [teacherPin] = useState('123456');
-      const [submissions, setSubmissions] = useState([]);
-      const [toastMsg, setToastMsg] = useState('');
+// ==========================================
+// 4. HÀM KIỂM TRA TRÙNG LẶP CÂU HỎI (JACCARD SIMILARITY)
+// ==========================================
+function calculateSimilarity(str1, str2) {
+  const normalize = (s) =>
+    s.toLowerCase()
+      .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?]/g, "")
+      .split(/\s+/)
+      .filter((w) => w.length > 2);
 
-      const showToast = useCallback((msg) => {
-        setToastMsg(msg);
-        setTimeout(() => setToastMsg(''), 3500);
-      }, []);
+  const set1 = new Set(normalize(str1));
+  const set2 = new Set(normalize(str2));
+  if (set1.size === 0 || set2.size === 0) return 0;
 
-      return (
-        <div className="min-h-screen flex flex-col bg-slate-50 text-slate-800">
-          {toastMsg && (
-            <div className="fixed bottom-4 right-4 z-50 bg-slate-900 text-white px-4 py-2.5 rounded-xl shadow-lg border border-emerald-500 text-xs font-bold">
-              {toastMsg}
-            </div>
-          )}
+  let intersection = 0;
+  set1.forEach((word) => {
+    if (set2.has(word)) intersection++;
+  });
 
-          <header className="bg-emerald-700 text-white shadow sticky top-0 z-40 print:hidden">
-            <div className="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h1 className="text-lg font-bold">BioMaster THPT - Chuyên Môn Sinh Học <span className="text-xs bg-emerald-800 px-2 py-0.5 rounded-full font-mono">v4.5</span></h1>
-                <p className="text-[11px] text-emerald-200">Biên soạn: <b>Thầy Trương Trung Can</b></p>
-              </div>
-              <nav className="flex flex-wrap gap-1.5 text-xs font-bold">
-                <button
-                  onClick={() => setActiveTab('quiz')}
-                  className={`px-3 py-1.5 rounded-lg transition ${activeTab === 'quiz' ? 'bg-white text-emerald-800 shadow' : 'hover:bg-emerald-600 text-white'}`}
-                >
-                  Luyện Trắc Nghiệm
-                </button>
-                <button
-                  onClick={() => setActiveTab('teacher')}
-                  className={`px-3 py-1.5 rounded-lg transition ${activeTab === 'teacher' ? 'bg-white text-emerald-800 shadow' : 'hover:bg-emerald-600 text-white'}`}
-                >
-                  Góc Giáo Viên (Sửa &amp; Tạo Đề)
-                </button>
-                <button
-                  onClick={() => setActiveTab('exporter')}
-                  className={`px-3 py-1.5 rounded-lg transition ${activeTab === 'exporter' ? 'bg-white text-emerald-800 shadow' : 'hover:bg-emerald-600 text-white'}`}
-                >
-                  Xuất Đề Word / PDF
-                </button>
-                <button
-                  onClick={() => setActiveTab('bioTools')}
-                  className={`px-3 py-1.5 rounded-lg transition ${activeTab === 'bioTools' ? 'bg-white text-emerald-800 shadow' : 'hover:bg-emerald-600 text-white'}`}
-                >
-                  🧬 Tiện Ích Sinh Học 12
-                </button>
-              </nav>
-            </div>
-          </header>
+  const union = set1.size + set2.size - intersection;
+  return intersection / union;
+}
 
-          <main className="flex-1 max-w-7xl w-full mx-auto px-4 py-6 print:p-0 print:max-w-none">
-            {activeTab === 'quiz' && (
-              <QuizView
-                questions={questions}
-                customExams={customExams}
-                selectedGrade={selectedGrade}
-                setSelectedGrade={setSelectedGrade}
-                onSaveSubmission={(sub) => setSubmissions(prev => [sub, ...prev])}
-              />
-            )}
-            {activeTab === 'teacher' && (
-              <TeacherView
-                questions={questions}
-                setQuestions={setQuestions}
-                customExams={customExams}
-                setCustomExams={setCustomExams}
-                isAuth={isTeacherAuth}
-                setIsAuth={setIsTeacherAuth}
-                teacherPin={teacherPin}
-                submissions={submissions}
-                setSubmissions={setSubmissions}
-                showToast={showToast}
-              />
-            )}
-            {activeTab === 'exporter' && (
-              <ExporterView
-                questions={questions}
-                customExams={customExams}
-                selectedGrade={selectedGrade}
-                setSelectedGrade={setSelectedGrade}
-              />
-            )}
-            {activeTab === 'bioTools' && <BioToolsView />}
-          </main>
+function isDuplicateQuestion(newContent, existingQuestions, threshold = 0.72) {
+  return existingQuestions.some(
+    (q) => calculateSimilarity(newContent, q.content) >= threshold
+  );
+}
 
-          <footer className="bg-slate-800 text-slate-400 py-3 text-center text-xs print:hidden">
-            © 2026 BioMaster THPT (Chuyên Sinh Học) - <b>Thầy Trương Trung Can</b>
-          </footer>
-        </div>
-      );
+// ==========================================
+// 5. COMPONENT CHÍNH CỦA ỨNG DỤNG
+// ==========================================
+export default function App() {
+  // Auth & Role State
+  const [user, setUser] = useState(null);
+  const [role, setRole] = useState('student'); // 'student' | 'teacher'
+  const [showRoleModal, setShowRoleModal] = useState(false);
+  const [teacherPinInput, setTeacherPinInput] = useState('');
+  const [pinError, setPinError] = useState('');
+
+  // Navigation State
+  const [activeTab, setActiveTab] = useState('practice'); // 'practice' | 'bank' | 'generator' | 'utilities' | 'results'
+
+  // Firestore Data States
+  const [questions, setQuestions] = useState([]);
+  const [exams, setExams] = useState([]);
+  const [utilities, setUtilities] = useState([]);
+  const [results, setResults] = useState([]);
+  const [loadingData, setLoadingData] = useState(true);
+
+  // Toast Notification
+  const [toast, setToast] = useState(null);
+  const showToast = (message, type = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 4000);
+  };
+
+  // Nạp Mammoth.js để đọc file Word (.docx)
+  useEffect(() => {
+    if (!window.mammoth) {
+      const script = document.createElement('script');
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js';
+      script.async = true;
+      document.body.appendChild(script);
     }
+  }, []);
 
-    function QuizView({ questions, customExams, selectedGrade, setSelectedGrade, onSaveSubmission }) {
-      const [selectedTopic, setSelectedTopic] = useState('Tất cả');
-      const [selectedCustomExamId, setSelectedCustomExamId] = useState('');
-      const [studentName, setStudentName] = useState('');
-      const [studentClass, setStudentClass] = useState('');
-      const [started, setStarted] = useState(false);
-      const [currentIdx, setCurrentIdx] = useState(0);
-      const [answers, setAnswers] = useState({});
-      const [submitted, setSubmitted] = useState(false);
-      const [activeList, setActiveList] = useState([]);
-
-      const topics = useMemo(() => ['Tất cả', ...(BIOLOGY_TOPICS[selectedGrade] || [])], [selectedGrade]);
-      const matchingCustomExams = useMemo(() => (customExams || []).filter(ex => ex.grade === selectedGrade), [customExams, selectedGrade]);
-
-      const filtered = useMemo(() => {
-        if (selectedCustomExamId) {
-          const found = (customExams || []).find(ex => String(ex.id) === String(selectedCustomExamId));
-          return found ? found.questions : [];
+  // 1. Khởi tạo Firebase Auth
+  useEffect(() => {
+    const initAuth = async () => {
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
         }
-        return questions.filter(q => q.subject === 'Sinh học' && q.grade === selectedGrade && (selectedTopic === 'Tất cả' || q.topic === selectedTopic));
-      }, [questions, customExams, selectedCustomExamId, selectedGrade, selectedTopic]);
+      } catch (err) {
+        console.error("Auth error:", err);
+      }
+    };
+    initAuth();
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+    });
+    return () => unsubscribe();
+  }, []);
 
-      const score = useMemo(() => activeList.reduce((acc, q, i) => (q.type === 'mcq' && answers[i] === q.correct ? acc + 1 : acc), 0), [activeList, answers]);
+  // 2. Đồng bộ dữ liệu từ Firestore (kèm khởi tạo dữ liệu mẫu nếu trống)
+  useEffect(() => {
+    if (!user) return;
 
-      if (!started) {
-        return (
-          <div className="max-w-2xl mx-auto bg-white p-6 rounded-2xl border shadow-sm space-y-4">
-            <h2 className="text-xl font-bold text-center text-slate-800">Luyện Trắc Nghiệm Môn Sinh Học THPT</h2>
-            <div className="grid grid-cols-3 gap-2">
-              {['10', '11', '12'].map(g => (
-                <button key={g} onClick={() => { setSelectedGrade(g); setSelectedTopic('Tất cả'); setSelectedCustomExamId(''); }} className={`p-2.5 rounded-xl text-xs font-bold ${selectedGrade === g ? 'bg-emerald-600 text-white' : 'bg-slate-100'}`}>Khối {g}</button>
-              ))}
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <input type="text" placeholder="Họ và tên học sinh..." value={studentName} onChange={e => setStudentName(e.target.value)} className="p-2.5 border rounded-xl text-xs" />
-              <input type="text" placeholder="Lớp (VD: 12A1)..." value={studentClass} onChange={e => setStudentClass(e.target.value)} className="p-2.5 border rounded-xl text-xs" />
-            </div>
+    const qCol = collection(db, 'artifacts', appId, 'public', 'data', 'questions');
+    const eCol = collection(db, 'artifacts', appId, 'public', 'data', 'exams');
+    const uCol = collection(db, 'artifacts', appId, 'public', 'data', 'utilities');
+    const rCol = collection(db, 'artifacts', appId, 'public', 'data', 'results');
 
-            {matchingCustomExams.length > 0 && (
-              <div className="p-3 bg-indigo-50/70 border border-indigo-200 rounded-xl space-y-1.5">
-                <label className="block text-[11px] font-bold text-indigo-800 uppercase">📁 Chọn Đề Riêng Của Thầy Can:</label>
-                <select
-                  value={selectedCustomExamId}
-                  onChange={e => setSelectedCustomExamId(e.target.value)}
-                  className="w-full p-2 border border-indigo-300 rounded-lg text-xs bg-white font-semibold text-indigo-900"
-                >
-                  <option value="">-- Luyện theo chuyên đề ngân hàng --</option>
-                  {matchingCustomExams.map(ex => (
-                    <option key={ex.id} value={ex.id}>[Mã {ex.examCode}] {ex.title} ({ex.questions.length} câu)</option>
-                  ))}
-                </select>
+    const unsubQ = onSnapshot(qCol, async (snap) => {
+      if (snap.empty) {
+        // Seed initial questions
+        const batch = writeBatch(db);
+        INITIAL_QUESTIONS.forEach((item) => {
+          const ref = doc(db, 'artifacts', appId, 'public', 'data', 'questions', item.id);
+          batch.set(ref, item);
+        });
+        await batch.commit();
+      } else {
+        const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        setQuestions(list);
+      }
+      setLoadingData(false);
+    }, (err) => {
+      console.error("Questions snapshot error:", err);
+      setQuestions(INITIAL_QUESTIONS);
+      setLoadingData(false);
+    });
+
+    const unsubE = onSnapshot(eCol, async (snap) => {
+      if (snap.empty) {
+        const batch = writeBatch(db);
+        INITIAL_EXAMS.forEach((item) => {
+          const ref = doc(db, 'artifacts', appId, 'public', 'data', 'exams', item.id);
+          batch.set(ref, item);
+        });
+        await batch.commit();
+      } else {
+        setExams(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      }
+    }, (err) => {
+      console.error("Exams snapshot error:", err);
+      setExams(INITIAL_EXAMS);
+    });
+
+    const unsubU = onSnapshot(uCol, async (snap) => {
+      if (snap.empty) {
+        const batch = writeBatch(db);
+        INITIAL_UTILITIES.forEach((item) => {
+          const ref = doc(db, 'artifacts', appId, 'public', 'data', 'utilities', item.id);
+          batch.set(ref, item);
+        });
+        await batch.commit();
+      } else {
+        setUtilities(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      }
+    }, (err) => {
+      console.error("Utilities snapshot error:", err);
+      setUtilities(INITIAL_UTILITIES);
+    });
+
+    const unsubR = onSnapshot(rCol, (snap) => {
+      const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      list.sort((a, b) => new Date(b.submittedAt) - new Date(a.submittedAt));
+      setResults(list);
+    }, (err) => {
+      console.error("Results snapshot error:", err);
+    });
+
+    return () => {
+      unsubQ();
+      unsubE();
+      unsubU();
+      unsubR();
+    };
+  }, [user]);
+
+  // Chuyển đổi vai trò Giáo viên / Học sinh
+  const handleSwitchRole = (targetRole) => {
+    if (targetRole === 'student') {
+      setRole('student');
+      if (activeTab === 'generator') setActiveTab('practice');
+      showToast('Đã chuyển sang chế độ Học sinh', 'info');
+    } else {
+      setTeacherPinInput('');
+      setPinError('');
+      setShowRoleModal(true);
+    }
+  };
+
+  const confirmTeacherLogin = (e) => {
+    e.preventDefault();
+    // Cho phép đăng nhập nhanh bằng mã mặc định 1234 hoặc bấm nút vào ngay
+    if (teacherPinInput === '1234' || teacherPinInput.trim() === '') {
+      setRole('teacher');
+      setShowRoleModal(false);
+      showToast('Đăng nhập quyền Giáo viên thành công!', 'success');
+    } else {
+      setPinError('Mã PIN chưa đúng (Gợi ý: nhập 1234 hoặc để trống để truy cập nhanh).');
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col font-sans">
+      {/* TOAST NOTIFICATION */}
+      {toast && (
+        <div className={`fixed bottom-5 right-5 z-50 flex items-center gap-3 px-5 py-3.5 rounded-xl shadow-xl text-white font-medium transition-all animate-bounce ${
+          toast.type === 'error' ? 'bg-rose-600' : toast.type === 'info' ? 'bg-sky-600' : 'bg-emerald-600'
+        }`}>
+          {toast.type === 'error' ? <AlertCircle className="w-5 h-5" /> : <CheckCircle2 className="w-5 h-5" />}
+          <span>{toast.message}</span>
+        </div>
+      )}
+
+      {/* HEADER */}
+      <header className="bg-gradient-to-r from-emerald-800 via-teal-800 to-cyan-900 text-white shadow-lg sticky top-0 z-40">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex flex-wrap items-center justify-between py-3.5 gap-3">
+            {/* Logo & Title */}
+            <div className="flex items-center gap-3">
+              <div className="bg-white/15 backdrop-blur-sm p-2.5 rounded-xl border border-white/20">
+                <Dna className="w-7 h-7 text-emerald-300" />
               </div>
-            )}
+              <div>
+                <div className="flex items-center gap-2">
+                  <h1 className="text-xl sm:text-2xl font-bold tracking-tight">BioMaster 2026</h1>
+                  <span className="text-xs bg-emerald-500/30 border border-emerald-300/40 text-emerald-100 px-2 py-0.5 rounded-full font-semibold">
+                    GDPT 2018
+                  </span>
+                </div>
+                <p className="text-xs text-teal-100 hidden sm:block">
+                  Hệ thống Ôn luyện & Quản lý Đề thi Sinh học THPT (Trọng tâm Lớp 12)
+                </p>
+              </div>
+            </div>
 
-            {!selectedCustomExamId && (
-              <select value={selectedTopic} onChange={e => setSelectedTopic(e.target.value)} className="w-full p-2.5 border rounded-xl text-xs bg-white">
-                {topics.map(t => <option key={t} value={t}>{t}</option>)}
-              </select>
+            {/* Role Switcher */}
+            <div className="flex items-center gap-2 bg-black/25 p-1.5 rounded-xl border border-white/10">
+              <button
+                onClick={() => handleSwitchRole('student')}
+                className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-sm font-semibold transition-all ${
+                  role === 'student'
+                    ? 'bg-white text-emerald-900 shadow-sm'
+                    : 'text-teal-100 hover:text-white'
+                }`}
+              >
+                <GraduationCap className="w-4 h-4" />
+                <span>Học sinh</span>
+              </button>
+              <button
+                onClick={() => handleSwitchRole('teacher')}
+                className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-sm font-semibold transition-all ${
+                  role === 'teacher'
+                    ? 'bg-amber-400 text-slate-900 shadow-sm'
+                    : 'text-teal-100 hover:text-white'
+                }`}
+              >
+                <ShieldCheck className="w-4 h-4" />
+                <span>Giáo viên</span>
+              </button>
+            </div>
+          </div>
+
+          {/* NAVIGATION TABS */}
+          <nav className="flex overflow-x-auto no-scrollbar gap-1 pb-2 pt-1 border-t border-white/10">
+            <button
+              onClick={() => setActiveTab('practice')}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold whitespace-nowrap transition-all ${
+                activeTab === 'practice'
+                  ? 'bg-white/20 text-white shadow-inner border border-white/20'
+                  : 'text-teal-100 hover:bg-white/10'
+              }`}
+            >
+              <Play className="w-4 h-4 text-emerald-300" />
+              <span>Luyện tập & Thi thử</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('bank')}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold whitespace-nowrap transition-all ${
+                activeTab === 'bank'
+                  ? 'bg-white/20 text-white shadow-inner border border-white/20'
+                  : 'text-teal-100 hover:bg-white/10'
+              }`}
+            >
+              <Layers className="w-4 h-4 text-cyan-300" />
+              <span>Ngân hàng câu hỏi ({questions.length})</span>
+            </button>
+
+            {role === 'teacher' && (
+              <button
+                onClick={() => setActiveTab('generator')}
+                className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold whitespace-nowrap transition-all ${
+                  activeTab === 'generator'
+                    ? 'bg-white/20 text-white shadow-inner border border-white/20'
+                    : 'text-teal-100 hover:bg-white/10'
+                }`}
+              >
+                <Sparkles className="w-4 h-4 text-amber-300" />
+                <span>Soạn đề & AI Gemini</span>
+              </button>
             )}
 
             <button
-              onClick={() => {
-                if (!studentName.trim() || filtered.length === 0) return;
-                setActiveList(filtered);
-                setAnswers({});
-                setSubmitted(false);
-                setCurrentIdx(0);
-                setStarted(true);
-              }}
-              disabled={!studentName.trim() || filtered.length === 0}
-              className="w-full py-3 bg-emerald-600 text-white rounded-xl font-bold text-sm disabled:opacity-50"
+              onClick={() => setActiveTab('utilities')}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold whitespace-nowrap transition-all ${
+                activeTab === 'utilities'
+                  ? 'bg-white/20 text-white shadow-inner border border-white/20'
+                  : 'text-teal-100 hover:bg-white/10'
+              }`}
             >
-              Bắt Đầu Làm Bài ({filtered.length} câu)
+              <Calculator className="w-4 h-4 text-lime-300" />
+              <span>Tiện ích & Công thức</span>
             </button>
-          </div>
-        );
-      }
 
-      const cur = activeList[currentIdx];
-      return (
-        <div className="max-w-3xl mx-auto space-y-4">
-          <div className="bg-white p-3.5 rounded-xl border flex justify-between items-center text-xs font-bold">
-            <button onClick={() => setStarted(false)} className="text-slate-500">← Thoát</button>
-            <span>{studentName} | Câu {currentIdx + 1}/{activeList.length}</span>
-            {!submitted && (
-              <button
-                onClick={() => {
-                  setSubmitted(true);
-                  onSaveSubmission({
-                    id: Date.now(),
-                    name: studentName.trim(),
-                    className: studentClass.trim() || `Khối ${selectedGrade}`,
-                    subject: 'Sinh học',
-                    topic: selectedCustomExamId ? 'Đề riêng giáo viên' : selectedTopic,
-                    score,
-                    total: activeList.length,
-                    submittedAt: new Date().toLocaleString('vi-VN')
-                  });
+            <button
+              onClick={() => setActiveTab('results')}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold whitespace-nowrap transition-all ${
+                activeTab === 'results'
+                  ? 'bg-white/20 text-white shadow-inner border border-white/20'
+                  : 'text-teal-100 hover:bg-white/10'
+              }`}
+            >
+              <Award className="w-4 h-4 text-rose-300" />
+              <span>Kết quả làm bài ({results.length})</span>
+            </button>
+          </nav>
+        </div>
+      </header>
+
+      {/* MAIN CONTENT */}
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        {loadingData ? (
+          <div className="flex flex-col items-center justify-center py-20 text-slate-500">
+            <RefreshCw className="w-10 h-10 animate-spin text-emerald-600 mb-3" />
+            <p className="font-medium">Đang đồng bộ dữ liệu Sinh học 2026...</p>
+          </div>
+        ) : (
+          <>
+            {activeTab === 'practice' && (
+              <PracticeSection
+                exams={exams}
+                questions={questions}
+                role={role}
+                user={user}
+                showToast={showToast}
+                onDeleteExam={async (id) => {
+                  await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'exams', id));
+                  showToast('Đã xóa đề thi!', 'info');
                 }}
-                className="bg-emerald-600 text-white px-3 py-1.5 rounded-lg"
+              />
+            )}
+
+            {activeTab === 'bank' && (
+              <QuestionBankSection
+                questions={questions}
+                role={role}
+                showToast={showToast}
+              />
+            )}
+
+            {activeTab === 'generator' && role === 'teacher' && (
+              <ExamGeneratorSection
+                questions={questions}
+                exams={exams}
+                showToast={showToast}
+              />
+            )}
+
+            {activeTab === 'utilities' && (
+              <UtilitiesSection
+                utilities={utilities}
+                role={role}
+                showToast={showToast}
+              />
+            )}
+
+            {activeTab === 'results' && (
+              <ResultsSection
+                results={results}
+                role={role}
+                showToast={showToast}
+              />
+            )}
+          </>
+        )}
+      </main>
+
+      {/* TEACHER LOGIN MODAL */}
+      {showRoleModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-100">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2.5 text-amber-600">
+                <ShieldCheck className="w-6 h-6" />
+                <h3 className="text-lg font-bold text-slate-900">Xác nhận quyền Giáo viên</h3>
+              </div>
+              <button onClick={() => setShowRoleModal(false)} className="text-slate-400 hover:text-slate-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <p className="text-sm text-slate-600 mb-4">
+              Quyền Giáo viên cho phép soạn đề bằng AI Gemini, tải lên đề gốc (.docx/.txt), chỉnh sửa/xóa hàng loạt ngân hàng câu hỏi, tiện ích và quản lý điểm học sinh.
+            </p>
+            <form onSubmit={confirmTeacherLogin} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold uppercase text-slate-500 mb-1">
+                  Mã PIN Giáo viên (Mặc định: 1234 hoặc để trống)
+                </label>
+                <input
+                  type="password"
+                  value={teacherPinInput}
+                  onChange={(e) => setTeacherPinInput(e.target.value)}
+                  placeholder="Nhập 1234..."
+                  className="w-full px-4 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
+                />
+                {pinError && <p className="text-xs text-rose-600 mt-1">{pinError}</p>}
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowRoleModal(false)}
+                  className="px-4 py-2 rounded-xl text-slate-600 hover:bg-slate-100 font-medium"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-md"
+                >
+                  Vào chế độ Giáo viên
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ==========================================
+// 6. MODULE 1: LUYỆN TẬP & THI THỬ TNTHPT
+// ==========================================
+function PracticeSection({ exams, questions, role, showToast, onDeleteExam }) {
+  const [mode, setMode] = useState('list'); // 'list' | 'taking' | 'review'
+  const [activeExam, setActiveExam] = useState(null);
+  const [studentName, setStudentName] = useState('');
+  const [studentClass, setStudentClass] = useState('12A1');
+  const [answers, setAnswers] = useState({});
+  const [timeLeft, setTimeLeft] = useState(0);
+  const [scoreSummary, setScoreSummary] = useState(null);
+
+  // Tùy chọn luyện tập nhanh theo chủ đề
+  const [selectedTopic, setSelectedTopic] = useState('cd1');
+  const [quickCount, setQuickCount] = useState(10);
+
+  // Đếm ngược thời gian làm bài
+  useEffect(() => {
+    if (mode !== 'taking' || timeLeft <= 0) return;
+    const timer = setInterval(() => {
+      setTimeLeft((prev) => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          handleSubmitExam();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [mode, timeLeft]);
+
+  const startExam = (examObj) => {
+    if (!studentName.trim()) {
+      showToast('Vui lòng nhập Họ và tên học sinh trước khi làm bài!', 'error');
+      return;
+    }
+    setActiveExam(examObj);
+    setAnswers({});
+    setScoreSummary(null);
+    setTimeLeft((examObj.duration || 50) * 60);
+    setMode('taking');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const startQuickTopicPractice = () => {
+    if (!studentName.trim()) {
+      showToast('Vui lòng nhập Họ và tên học sinh trước khi luyện tập!', 'error');
+      return;
+    }
+    const pool = questions.filter((q) => q.topicId === selectedTopic);
+    if (pool.length === 0) {
+      showToast('Chủ đề này chưa có câu hỏi. Hãy thêm câu hỏi trong Ngân hàng!', 'error');
+      return;
+    }
+    const shuffled = [...pool].sort(() => 0.5 - Math.random()).slice(0, quickCount);
+    const topicObj = TOPICS_12.find((t) => t.id === selectedTopic);
+    startExam({
+      id: 'quick_' + Date.now(),
+      title: `Luyện tập chuyên đề: ${topicObj?.short || selectedTopic}`,
+      grade: topicObj?.grade || '12',
+      duration: Math.max(10, shuffled.length * 2),
+      questions: shuffled
+    });
+  };
+
+  // Chấm điểm chuẩn cấu trúc TNTHPT 2025-2026 (Thang 10)
+  const handleSubmitExam = async () => {
+    if (!activeExam) return;
+    const qs = activeExam.questions || [];
+    let totalRawPoints = 0;
+    let maxRawPoints = 0;
+    let correctCount = 0;
+
+    qs.forEach((q) => {
+      if (q.type === 'MCQ') {
+        maxRawPoints += 0.25;
+        if (answers[q.id] === q.correctAnswer) {
+          totalRawPoints += 0.25;
+          correctCount++;
+        }
+      } else if (q.type === 'TF') {
+        maxRawPoints += 1.0;
+        const userSub = answers[q.id] || {};
+        let subCorrect = 0;
+        (q.subItems || []).forEach((sub) => {
+          if (userSub[sub.id] === sub.answer) subCorrect++;
+        });
+        // Quy tắc tính điểm Đúng/Sai của Bộ GD&ĐT: 1 ý=0.1, 2 ý=0.25, 3 ý=0.5, 4 ý=1.0
+        const tfMap = { 0: 0, 1: 0.1, 2: 0.25, 3: 0.5, 4: 1.0 };
+        totalRawPoints += tfMap[subCorrect] || 0;
+        if (subCorrect === 4) correctCount++;
+      } else if (q.type === 'SHORT') {
+        maxRawPoints += 0.5;
+        const userVal = String(answers[q.id] || '').trim().replace(',', '.');
+        const trueVal = String(q.correctAnswer || '').trim().replace(',', '.');
+        if (userVal !== '' && userVal.toLowerCase() === trueVal.toLowerCase()) {
+          totalRawPoints += 0.5;
+          correctCount++;
+        }
+      }
+    });
+
+    const finalScore10 = maxRawPoints > 0
+      ? Math.round(((totalRawPoints / maxRawPoints) * 10) * 100) / 100
+      : 0;
+
+    const summary = {
+      studentName: studentName.trim(),
+      studentClass: studentClass.trim() || '12',
+      examTitle: activeExam.title,
+      score: finalScore10,
+      correctCount,
+      totalQuestions: qs.length,
+      submittedAt: new Date().toISOString()
+    };
+
+    setScoreSummary(summary);
+    setMode('review');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+
+    // Lưu kết quả vào Firestore
+    try {
+      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'results'), summary);
+      showToast(`Đã nộp bài và lưu kết quả: ${finalScore10} điểm!`, 'success');
+    } catch (err) {
+      console.error('Save result error:', err);
+    }
+  };
+
+  const formatTime = (sec) => {
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  };
+
+  if (mode === 'taking' || mode === 'review') {
+    const qs = activeExam.questions || [];
+    return (
+      <div className="space-y-6">
+        {/* Thanh trạng thái làm bài */}
+        <div className="bg-white rounded-2xl p-4 sm:p-5 shadow-md border border-slate-200 flex flex-wrap items-center justify-between gap-4 sticky top-20 z-30">
+          <div>
+            <h2 className="font-bold text-slate-900 text-base sm:text-lg">{activeExam.title}</h2>
+            <p className="text-xs text-slate-500">
+              Thí sinh: <strong className="text-emerald-700">{studentName}</strong> ({studentClass}) • Tổng số: {qs.length} câu
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            {mode === 'taking' ? (
+              <>
+                <div className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl font-mono font-bold text-base ${
+                  timeLeft < 300 ? 'bg-rose-100 text-rose-700 animate-pulse' : 'bg-emerald-50 text-emerald-700'
+                }`}>
+                  <Clock className="w-4 h-4" />
+                  <span>{formatTime(timeLeft)}</span>
+                </div>
+                <button
+                  onClick={handleSubmitExam}
+                  className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-md transition-all"
+                >
+                  Nộp bài
+                </button>
+              </>
+            ) : (
+              <button
+                onClick={() => setMode('list')}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-900 text-white font-semibold"
               >
-                Nộp Bài
+                Quay lại danh sách đề
               </button>
             )}
           </div>
-
-          {submitted && (
-            <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-xl text-center">
-              <p className="text-lg font-extrabold text-emerald-800">Kết quả: {score} / {activeList.length} câu đúng</p>
-            </div>
-          )}
-
-          {cur && (
-            <div className="bg-white p-6 rounded-2xl border space-y-4">
-              <h3 className="font-bold text-sm leading-relaxed">Câu {currentIdx + 1}: {cur.question}</h3>
-              <div className="space-y-2">
-                {(cur.options || []).map((opt, oi) => {
-                  const picked = answers[currentIdx] === oi;
-                  const right = cur.correct === oi;
-                  let cls = 'border-slate-200';
-                  if (submitted) {
-                    if (right) cls = 'border-emerald-500 bg-emerald-50 font-bold text-emerald-900';
-                    else if (picked) cls = 'border-rose-500 bg-rose-50 text-rose-900';
-                  } else if (picked) {
-                    cls = 'border-emerald-600 bg-emerald-50 font-semibold';
-                  }
-                  return (
-                    <button key={oi} onClick={() => !submitted && setAnswers(p => ({ ...p, [currentIdx]: oi }))} className={`w-full p-3 border rounded-xl text-left text-xs ${cls} block`}>
-                      <b>{String.fromCharCode(65 + oi)}.</b> {opt}
-                    </button>
-                  );
-                })}
-              </div>
-              {submitted && cur.explanation && (
-                <div className="p-3 bg-slate-50 border rounded-xl text-xs text-slate-700">{cur.explanation}</div>
-              )}
-              <div className="flex justify-between pt-2 border-t">
-                <button disabled={currentIdx === 0} onClick={() => setCurrentIdx(i => i - 1)} className="px-3 py-1.5 border rounded-lg text-xs disabled:opacity-40">← Trước</button>
-                <button disabled={currentIdx === activeList.length - 1} onClick={() => setCurrentIdx(i => i + 1)} className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-xs disabled:opacity-40">Tiếp →</button>
-              </div>
-            </div>
-          )}
         </div>
-      );
+
+        {/* Bảng kết quả sau khi nộp */}
+        {mode === 'review' && scoreSummary && (
+          <div className="bg-gradient-to-r from-emerald-600 to-teal-700 text-white rounded-2xl p-6 shadow-xl flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <span className="text-xs uppercase tracking-wider bg-white/20 px-2.5 py-1 rounded-full font-semibold">
+                Kết quả chính thức
+              </span>
+              <h3 className="text-2xl sm:text-3xl font-extrabold mt-2">
+                Điểm số: {scoreSummary.score} / 10 điểm
+              </h3>
+              <p className="text-emerald-100 text-sm mt-1">
+                Hoàn thành trọn vẹn {scoreSummary.correctCount}/{scoreSummary.totalQuestions} câu hỏi • Kết quả đã được lưu vào hệ thống.
+              </p>
+            </div>
+            <Award className="w-16 h-16 text-amber-300 opacity-90" />
+          </div>
+        )}
+
+        {/* Danh sách câu hỏi */}
+        <div className="space-y-5">
+          {qs.map((q, idx) => {
+            const isReview = mode === 'review';
+            return (
+              <div key={q.id || idx} className="bg-white rounded-2xl p-5 sm:p-6 shadow-sm border border-slate-200">
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                  <div className="flex items-center gap-2">
+                    <span className="bg-emerald-100 text-emerald-800 font-bold text-xs px-3 py-1 rounded-lg">
+                      Câu {idx + 1}
+                    </span>
+                    <span className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-slate-100 text-slate-600">
+                      {q.type === 'MCQ' ? 'Phần I: Nhiều lựa chọn' : q.type === 'TF' ? 'Phần II: Đúng / Sai' : 'Phần III: Trả lời ngắn'}
+                    </span>
+                  </div>
+                  {q.source && <span className="text-xs text-slate-400 italic">{q.source}</span>}
+                </div>
+
+                <p className="text-slate-800 font-medium leading-relaxed mb-4 whitespace-pre-line">{q.content}</p>
+
+                {/* DẠNG 1: TRẮC NGHIỆM 4 LỰA CHỌN */}
+                {q.type === 'MCQ' && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {(q.options || []).map((opt, oIdx) => {
+                      const letter = ['A', 'B', 'C', 'D'][oIdx];
+                      const selected = answers[q.id] === letter;
+                      const isCorrect = q.correctAnswer === letter;
+                      let style = 'border-slate-200 hover:border-emerald-400 hover:bg-emerald-50/40';
+                      if (isReview) {
+                        if (isCorrect) style = 'border-emerald-500 bg-emerald-50 text-emerald-900 font-semibold';
+                        else if (selected && !isCorrect) style = 'border-rose-500 bg-rose-50 text-rose-900';
+                      } else if (selected) {
+                        style = 'border-emerald-600 bg-emerald-50 text-emerald-900 font-semibold ring-2 ring-emerald-500/20';
+                      }
+
+                      return (
+                        <button
+                          key={letter}
+                          disabled={isReview}
+                          onClick={() => setAnswers({ ...answers, [q.id]: letter })}
+                          className={`flex items-start gap-3 p-3.5 rounded-xl border text-left transition-all ${style}`}
+                        >
+                          <span className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold shrink-0 ${
+                            selected || (isReview && isCorrect) ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-700'
+                          }`}>
+                            {letter}
+                          </span>
+                          <span className="text-sm pt-0.5">{opt}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* DẠNG 2: TRẮC NGHIỆM ĐÚNG / SAI */}
+                {q.type === 'TF' && (
+                  <div className="border border-slate-200 rounded-xl overflow-hidden">
+                    <div className="grid grid-cols-12 bg-slate-100 px-4 py-2.5 text-xs font-bold text-slate-600 uppercase">
+                      <div className="col-span-8 sm:col-span-9">Mệnh đề đánh giá</div>
+                      <div className="col-span-2 sm:col-span-1 text-center">Đúng</div>
+                      <div className="col-span-2 text-center">Sai</div>
+                    </div>
+                    {(q.subItems || []).map((sub) => {
+                      const userVal = (answers[q.id] || {})[sub.id];
+                      return (
+                        <div key={sub.id} className="grid grid-cols-12 items-center px-4 py-3 border-t border-slate-200 gap-2">
+                          <div className="col-span-8 sm:col-span-9 text-sm text-slate-800">
+                            <strong className="uppercase mr-1.5 text-emerald-700">{sub.id})</strong>
+                            {sub.text}
+                            {isReview && (
+                              <span className={`ml-2 text-xs font-bold px-2 py-0.5 rounded ${
+                                userVal === sub.answer ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'
+                              }`}>
+                                Đáp án: {sub.answer ? 'Đúng' : 'Sai'}
+                              </span>
+                            )}
+                          </div>
+                          <div className="col-span-2 sm:col-span-1 flex justify-center">
+                            <button
+                              disabled={isReview}
+                              onClick={() => setAnswers({
+                                ...answers,
+                                [q.id]: { ...(answers[q.id] || {}), [sub.id]: true }
+                              })}
+                              className={`w-8 h-8 rounded-lg border font-bold text-xs ${
+                                userVal === true ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-slate-500 border-slate-300'
+                              }`}
+                            >
+                              Đ
+                            </button>
+                          </div>
+                          <div className="col-span-2 flex justify-center">
+                            <button
+                              disabled={isReview}
+                              onClick={() => setAnswers({
+                                ...answers,
+                                [q.id]: { ...(answers[q.id] || {}), [sub.id]: false }
+                              })}
+                              className={`w-8 h-8 rounded-lg border font-bold text-xs ${
+                                userVal === false ? 'bg-rose-600 text-white border-rose-600' : 'bg-white text-slate-500 border-slate-300'
+                              }`}
+                            >
+                              S
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* DẠNG 3: TRẢ LỜI NGẮN */}
+                {q.type === 'SHORT' && (
+                  <div className="max-w-md">
+                    <label className="block text-xs font-semibold text-slate-500 mb-1.5">
+                      Nhập đáp số của bạn (số nguyên hoặc số thập phân):
+                    </label>
+                    <input
+                      type="text"
+                      disabled={isReview}
+                      value={answers[q.id] || ''}
+                      onChange={(e) => setAnswers({ ...answers, [q.id]: e.target.value })}
+                      placeholder="Ví dụ: 2495 hoặc 0.1"
+                      className="w-full px-4 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-emerald-500 outline-none font-mono font-bold text-slate-900"
+                    />
+                    {isReview && (
+                      <p className="mt-2 text-sm font-bold text-emerald-700">
+                        Đáp án chính xác: <span className="bg-emerald-100 px-2.5 py-0.5 rounded">{q.correctAnswer}</span>
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {/* LỜI GIẢI CHI TIẾT */}
+                {isReview && q.explanation && (
+                  <div className="mt-4 p-4 rounded-xl bg-amber-50/80 border border-amber-200 text-sm text-slate-700">
+                    <strong className="text-amber-800 block mb-1">💡 Hướng dẫn giải chi tiết:</strong>
+                    {q.explanation}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-8">
+      {/* Thông tin học sinh */}
+      <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
+        <div className="flex items-center gap-2.5 mb-4">
+          <UserCheck className="w-5 h-5 text-emerald-600" />
+          <h2 className="text-lg font-bold text-slate-900">Thông tin thí sinh luyện tập</h2>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs font-semibold uppercase text-slate-500 mb-1">Họ và tên học sinh *</label>
+            <input
+              type="text"
+              value={studentName}
+              onChange={(e) => setStudentName(e.target.value)}
+              placeholder="Nhập họ tên của bạn (VD: Nguyễn Văn An)"
+              className="w-full px-4 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-emerald-500 outline-none"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold uppercase text-slate-500 mb-1">Lớp / Khối</label>
+            <input
+              type="text"
+              value={studentClass}
+              onChange={(e) => setStudentClass(e.target.value)}
+              placeholder="VD: 12A1"
+              className="w-full px-4 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-emerald-500 outline-none"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Luyện tập nhanh theo chuyên đề 3 khối */}
+      <div className="bg-gradient-to-br from-teal-900 to-emerald-950 text-white rounded-2xl p-6 shadow-lg">
+        <div className="flex items-center gap-2 mb-2">
+          <Sparkles className="w-5 h-5 text-amber-300" />
+          <h3 className="text-lg font-bold">Luyện tập tự chọn theo Chuyên đề (Khối 10 - 11 - 12)</h3>
+        </div>
+        <p className="text-sm text-teal-100 mb-5">
+          Hệ thống tự động trích xuất ngẫu nhiên các câu hỏi từ Ngân hàng theo chủ đề bạn chọn để rèn luyện kỹ năng.
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
+          <div className="md:col-span-7">
+            <label className="block text-xs font-semibold text-teal-200 mb-1">Chọn chuyên đề ôn luyện</label>
+            <select
+              value={selectedTopic}
+              onChange={(e) => setSelectedTopic(e.target.value)}
+              className="w-full px-4 py-2.5 rounded-xl bg-white/10 border border-white/20 text-white focus:outline-none"
+            >
+              {TOPICS_12.map((t) => (
+                <option key={t.id} value={t.id} className="text-slate-900">
+                  [Khối {t.grade}] {t.name} ({questions.filter((q) => q.topicId === t.id).length} câu)
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="md:col-span-2">
+            <label className="block text-xs font-semibold text-teal-200 mb-1">Số câu hỏi</label>
+            <select
+              value={quickCount}
+              onChange={(e) => setQuickCount(Number(e.target.value))}
+              className="w-full px-4 py-2.5 rounded-xl bg-white/10 border border-white/20 text-white focus:outline-none"
+            >
+              <option value={5} className="text-slate-900">5 câu</option>
+              <option value={10} className="text-slate-900">10 câu</option>
+              <option value={20} className="text-slate-900">20 câu</option>
+              <option value={40} className="text-slate-900">40 câu</option>
+            </select>
+          </div>
+          <div className="md:col-span-3">
+            <button
+              onClick={startQuickTopicPractice}
+              className="w-full py-2.5 px-5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold shadow-md flex items-center justify-center gap-2 transition-all"
+            >
+              <Play className="w-4 h-4 fill-current" />
+              <span>Bắt đầu luyện ngay</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Danh sách Đề thi thử TNTHPT */}
+      <div>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+            <FileText className="w-5 h-5 text-emerald-600" />
+            <span>Bộ Đề Thi Thử TNTHPT & Đề Giáo Viên Giao ({exams.length})</span>
+          </h3>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          {exams.map((ex) => (
+            <div key={ex.id} className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 hover:shadow-md transition-all flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800">
+                    Sinh học {ex.grade || '12'}
+                  </span>
+                  <span className="text-xs text-slate-500 flex items-center gap-1">
+                    <Clock className="w-3.5 h-3.5" /> {ex.duration || 50} phút • {(ex.questions || []).length} câu
+                  </span>
+                </div>
+                <h4 className="font-bold text-slate-900 text-lg mb-2">{ex.title}</h4>
+                <p className="text-sm text-slate-600 mb-4 line-clamp-2">
+                  {ex.description || 'Đề thi chuẩn cấu trúc đánh giá năng lực Sinh học THPT.'}
+                </p>
+              </div>
+              <div className="flex items-center justify-between pt-4 border-t border-slate-100">
+                <button
+                  onClick={() => startExam(ex)}
+                  className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-sm flex items-center gap-2 shadow-sm"
+                >
+                  <Play className="w-4 h-4" />
+                  <span>Vào làm bài thi</span>
+                </button>
+                {role === 'teacher' && (
+                  <button
+                    onClick={() => onDeleteExam(ex.id)}
+                    className="p-2 text-rose-500 hover:bg-rose-50 rounded-lg"
+                    title="Xóa đề thi"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ==========================================
+// 7. MODULE 2: NGÂN HÀNG CÂU HỎI (ĐỦ 50 CÂU/CHỦ ĐỀ & SỬA/XÓA HÀNG LOẠT)
+// ==========================================
+function QuestionBankSection({ questions, role, showToast }) {
+  const [filterTopic, setFilterTopic] = useState('all');
+  const [filterType, setFilterType] = useState('all');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [isGeneratingBulk, setIsGeneratingBulk] = useState(false);
+
+  // Modal Thêm / Sửa câu hỏi
+  const [editingQuestion, setEditingQuestion] = useState(null);
+  // Modal Sửa hàng loạt chủ đề/mức độ
+  const [showBatchEditModal, setShowBatchEditModal] = useState(false);
+  const [batchTopic, setBatchTopic] = useState('cd1');
+  const [batchLevel, setBatchLevel] = useState('Thông hiểu');
+
+  const filteredQuestions = useMemo(() => {
+    return questions.filter((q) => {
+      const matchTopic = filterTopic === 'all' || q.topicId === filterTopic;
+      const matchType = filterType === 'all' || q.type === filterType;
+      const matchSearch = !searchQuery.trim() ||
+        q.content.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (q.source || '').toLowerCase().includes(searchQuery.toLowerCase());
+      return matchTopic && matchType && matchSearch;
+    });
+  }, [questions, filterTopic, filterType, searchQuery]);
+
+  // Thống kê số lượng câu hỏi theo từng chủ đề (mục tiêu 50 câu/chủ đề)
+  const topicCounts = useMemo(() => {
+    const map = {};
+    TOPICS_12.forEach((t) => {
+      map[t.id] = questions.filter((q) => q.topicId === t.id).length;
+    });
+    return map;
+  }, [questions]);
+
+  // AI Gemini tự động bổ sung câu hỏi cho đủ 50 câu/chủ đề (chống trùng lặp)
+  const handleAutoFillTo50 = async (topicObj) => {
+    const currentCount = topicCounts[topicObj.id] || 0;
+    const needed = Math.max(0, 50 - currentCount);
+    if (needed === 0) {
+      showToast(`Chủ đề "${topicObj.short}" đã đạt đủ 50 câu hỏi!`, 'info');
+      return;
     }
 
-    function TeacherView({ questions, setQuestions, customExams, setCustomExams, isAuth, setIsAuth, teacherPin, submissions, setSubmissions, showToast }) {
-      const [pinInput, setPinInput] = useState('');
-      const [subTab, setSubTab] = useState('upload');
-      const [grade, setGrade] = useState('12');
-      const [topicName, setTopicName] = useState('Đề Sinh Học Mới');
-      const [customExamCode, setCustomExamCode] = useState('202');
-      const [uploadStatus, setUploadStatus] = useState('');
-      const [parsedList, setParsedList] = useState([]);
-      const [previewMode, setPreviewMode] = useState(false);
-      const [viewingExamId, setViewingExamId] = useState(null);
-      const [isAiProcessing, setIsAiProcessing] = useState(false);
+    const batchSize = Math.min(needed, 10); // Sinh mỗi đợt 10 câu để đảm bảo chất lượng cao
+    setIsGeneratingBulk(true);
+    showToast(`AI Gemini đang biên soạn ${batchSize} câu hỏi chuẩn đề TNTHPT 2023-2026 cho "${topicObj.short}"...`, 'info');
 
-      const [editingExamId, setEditingExamId] = useState(null);
-      const [editingQuestions, setEditingQuestions] = useState([]);
+    try {
+      const existingSamples = questions
+        .filter((q) => q.topicId === topicObj.id)
+        .slice(0, 8)
+        .map((q) => q.content)
+        .join('\n- ');
 
-      if (!isAuth) {
-        return (
-          <div className="max-w-sm mx-auto bg-white p-6 rounded-2xl border shadow-sm text-center space-y-4">
-            <h2 className="font-bold text-base">Xác Thực Giáo Viên Sinh Học</h2>
-            <input type="password" placeholder="Nhập PIN (mặc định: 123456)" value={pinInput} onChange={e => setPinInput(e.target.value)} className="w-full p-2.5 border rounded-xl text-center font-mono text-sm" />
-            <button onClick={() => pinInput === teacherPin && setIsAuth(true)} className="w-full py-2.5 bg-emerald-600 text-white rounded-xl text-xs font-bold">Mở Khóa</button>
-          </div>
-        );
-      }
+      const prompt = `Hãy đóng vai chuyên gia ra đề thi Tốt nghiệp THPT môn Sinh học của Bộ GD&ĐT Việt Nam (Chương trình GDPT 2018).
+Hãy tạo ${batchSize} câu hỏi trắc nghiệm mới, KHÔNG TRÙNG LẶP nội dung cho chủ đề: "${topicObj.name}" (Khối ${topicObj.grade}).
+Nguồn tham khảo phong cách: Đề minh họa và Đề chính thức TNTHPT các năm 2023, 2024, 2025, 2026.
+Phân bổ đa dạng cả 3 dạng thức:
+- "MCQ": Trắc nghiệm 4 lựa chọn (options gồm 4 phương án, correctAnswer là "A", "B", "C" hoặc "D").
+- "TF": Trắc nghiệm Đúng/Sai gồm 4 ý a, b, c, d (subItems gồm 4 object {id, text, answer: boolean}).
+- "SHORT": Trắc nghiệm trả lời ngắn (tính toán ra con số cụ thể, correctAnswer là chuỗi số).
 
-      const handleUploadFile = async (e, mode) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-        setUploadStatus(`Đang đọc tệp "${file.name}" và quét đáp án tô màu / gạch dưới...`);
-        let extracted = { text: '', richBlocks: {}, pageImages: {}, answerHints: {} };
-        if (file.name.toLowerCase().endsWith('.pdf')) {
-          extracted = await extractTextFromPdfFile(file, setUploadStatus);
-        } else if (file.name.toLowerCase().endsWith('.docx')) {
-          extracted = await extractTextFromDocxFile(file);
-        } else {
-          extracted.text = cleanVietnameseUnicode(await file.text());
+Tránh trùng với các câu đã có sau:
+- ${existingSamples}
+
+Trả về JSON array các object theo đúng schema.`;
+
+      const schema = {
+        type: "ARRAY",
+        items: {
+          type: "OBJECT",
+          properties: {
+            type: { type: "STRING" },
+            level: { type: "STRING" },
+            source: { type: "STRING" },
+            content: { type: "STRING" },
+            options: { type: "ARRAY", items: { type: "STRING" } },
+            subItems: {
+              type: "ARRAY",
+              items: {
+                type: "OBJECT",
+                properties: {
+                  id: { type: "STRING" },
+                  text: { type: "STRING" },
+                  answer: { type: "BOOLEAN" }
+                }
+              }
+            },
+            correctAnswer: { type: "STRING" },
+            explanation: { type: "STRING" }
+          },
+          required: ["type", "content", "explanation"]
         }
-
-        let generated = [];
-        if (mode === 'ai_similar' || mode === 'ai_exact') {
-          setIsAiProcessing(true);
-          setUploadStatus(`Đang kết nối Gemini AI Grounding để xử lý đề thi (${mode === 'ai_similar' ? 'Tạo đề tương tự AI' : 'Trích xuất chính xác AI'})...`);
-          const aiRes = await generateAiSimilarExamFromGemini(extracted.text, grade, topicName.trim() || file.name, mode === 'ai_similar' ? 'similar' : 'exact');
-          setIsAiProcessing(false);
-          if (aiRes && aiRes.length > 0) {
-            generated = aiRes;
-          } else {
-            setUploadStatus('AI bận hoặc không phản hồi, hệ thống chuyển sang trích xuất tự động cục bộ...');
-            generated = parseAndGenerateSimilarFromText(extracted.text, grade, topicName.trim() || file.name, {
-              richBlocks: extracted.richBlocks,
-              pageImages: extracted.pageImages,
-              answerHints: extracted.answerHints,
-              mode: mode === 'ai_similar' ? 'similar' : 'exact'
-            });
-          }
-        } else {
-          generated = parseAndGenerateSimilarFromText(extracted.text, grade, topicName.trim() || file.name, {
-            richBlocks: extracted.richBlocks,
-            pageImages: extracted.pageImages,
-            answerHints: extracted.answerHints,
-            mode
-          });
-        }
-
-        setParsedList(generated);
-        setPreviewMode(true);
-        setUploadStatus(generated.length > 0 ? `Đã xử lý thành công ${generated.length} câu hỏi!` : 'Không tìm thấy cấu trúc câu hỏi.');
-        e.target.value = '';
       };
 
-      return (
-        <div className="space-y-4">
-          <div className="flex flex-wrap gap-2">
-            {[
-              { id: 'upload', label: '1. Upload PDF / Word' },
-              { id: 'customExams', label: `2. Kho Đề Đã Lưu & Chỉnh Sửa (${customExams.length})` },
-              { id: 'results', label: `3. Kết Quả Học Sinh (${submissions.length})` }
-            ].map(t => (
-              <button
-                key={t.id}
-                onClick={() => setSubTab(t.id)}
-                className={`px-3.5 py-2 rounded-xl text-xs font-bold ${subTab === t.id ? 'bg-emerald-600 text-white shadow' : 'bg-white border text-slate-700'}`}
-              >
-                {t.label}
-              </button>
-            ))}
+      const generated = await callGeminiAPI(prompt, "Bạn là giáo viên Sinh học THPT xuất sắc.", schema);
+      const batch = writeBatch(db);
+      let addedCount = 0;
+
+      generated.forEach((item) => {
+        if (!isDuplicateQuestion(item.content, questions)) {
+          const newRef = doc(collection(db, 'artifacts', appId, 'public', 'data', 'questions'));
+          batch.set(newRef, {
+            ...item,
+            grade: topicObj.grade,
+            topicId: topicObj.id,
+            source: item.source || 'Đề phát triển TNTHPT 2026 (AI)',
+            level: item.level || 'Thông hiểu'
+          });
+          addedCount++;
+        }
+      });
+
+      await batch.commit();
+      showToast(`Đã bổ sung thành công ${addedCount} câu hỏi mới (đã lọc trùng lặp)!`, 'success');
+    } catch (err) {
+      console.error(err);
+      showToast('Có lỗi khi gọi AI Gemini. Vui lòng thử lại!', 'error');
+    } finally {
+      setIsGeneratingBulk(false);
+    }
+  };
+
+  // Xóa hàng loạt câu hỏi đã chọn
+  const handleBulkDelete = async () => {
+    if (selectedIds.length === 0) return;
+    try {
+      const batch = writeBatch(db);
+      selectedIds.forEach((id) => {
+        batch.delete(doc(db, 'artifacts', appId, 'public', 'data', 'questions', id));
+      });
+      await batch.commit();
+      showToast(`Đã xóa ${selectedIds.length} câu hỏi khỏi ngân hàng!`, 'info');
+      setSelectedIds([]);
+    } catch (err) {
+      showToast('Lỗi khi xóa hàng loạt!', 'error');
+    }
+  };
+
+  // Cập nhật hàng loạt chuyên đề / mức độ
+  const handleBulkUpdate = async () => {
+    if (selectedIds.length === 0) return;
+    const topicObj = TOPICS_12.find((t) => t.id === batchTopic);
+    try {
+      const batch = writeBatch(db);
+      selectedIds.forEach((id) => {
+        batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'questions', id), {
+          topicId: batchTopic,
+          grade: topicObj?.grade || '12',
+          level: batchLevel
+        });
+      });
+      await batch.commit();
+      showToast(`Đã cập nhật đồng loạt ${selectedIds.length} câu hỏi!`, 'success');
+      setShowBatchEditModal(false);
+      setSelectedIds([]);
+    } catch (err) {
+      showToast('Lỗi khi cập nhật hàng loạt!', 'error');
+    }
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.length === filteredQuestions.length) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(filteredQuestions.map((q) => q.id));
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Bảng tiến độ 50 câu / chủ đề */}
+      <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+          <div>
+            <h2 className="text-lg font-bold text-slate-900">Tiến độ Ngân hàng Câu hỏi theo Chủ đề (Mục tiêu: 50 câu/chủ đề)</h2>
+            <p className="text-xs text-slate-500">
+              Tổng hợp từ đề minh họa & đề chính thức TNTHPT 2023 - 2026, tự động kiểm tra chống trùng lặp nội dung.
+            </p>
           </div>
-
-          {subTab === 'upload' && (
-            <div className="bg-white p-5 rounded-2xl border space-y-4">
-              <h3 className="font-bold text-sm text-slate-800">Tạo Đề Thi Môn Sinh Học Từ File PDF / Word (.docx)</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                <select value={grade} onChange={e => setGrade(e.target.value)} className="p-2.5 border rounded-xl bg-white font-bold">
-                  <option value="12">Sinh học Khối 12</option>
-                  <option value="11">Sinh học Khối 11</option>
-                  <option value="10">Sinh học Khối 10</option>
-                </select>
-                <input
-                  type="text"
-                  value={topicName}
-                  onChange={e => setTopicName(e.target.value)}
-                  placeholder="Tên đề thi..."
-                  className="p-2.5 border rounded-xl"
-                />
-              </div>
-              <div className="flex items-center gap-2 text-xs">
-                <span className="font-bold text-slate-600">Mã đề:</span>
-                <input type="text" value={customExamCode} onChange={e => setCustomExamCode(e.target.value)} className="w-24 p-2 border rounded-lg font-mono font-bold text-center" />
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <label className="p-4 border-2 border-dashed border-blue-300 bg-blue-50/50 rounded-xl text-center cursor-pointer hover:bg-blue-50 transition">
-                  <span className="block font-bold text-xs text-blue-800">📄 Chế độ 1: Giữ Nguyên Đề Gốc (Quét Đáp Án Tô Màu / Gạch Dưới)</span>
-                  <input type="file" accept=".pdf,.docx,.txt" onChange={e => handleUploadFile(e, 'exact')} className="hidden" />
-                </label>
-                <label className="p-4 border-2 border-dashed border-emerald-300 bg-emerald-50/50 rounded-xl text-center cursor-pointer hover:bg-emerald-50 transition">
-                  <span className="block font-bold text-xs text-emerald-800">✨ Chế độ 2: Sinh Đề Tương Tự Mới (Cục bộ)</span>
-                  <input type="file" accept=".pdf,.docx,.txt" onChange={e => handleUploadFile(e, 'similar')} className="hidden" />
-                </label>
-                <label className="p-4 border-2 border-dashed border-indigo-300 bg-indigo-50/50 rounded-xl text-center cursor-pointer hover:bg-indigo-50 transition sm:col-span-2">
-                  <span className="block font-bold text-xs text-indigo-900">🤖 Chế độ 3: <b>Gemini AI Grounding</b> - Tạo Đề &amp; Đề Tương Tự Thông Minh Cực Chính Xác</span>
-                  <input type="file" accept=".pdf,.docx,.txt" onChange={e => handleUploadFile(e, 'ai_similar')} className="hidden" />
-                </label>
-              </div>
-
-              {isAiProcessing && (
-                <div className="p-3 bg-indigo-50 text-indigo-800 rounded-xl text-xs font-bold text-center animate-pulse">
-                  🤖 Gemini AI đang phân tích nội dung, tìm kiếm thông tin và biên soạn đề thi chuẩn xác...
-                </div>
-              )}
-
-              {uploadStatus && <p className="text-xs font-semibold text-indigo-700 bg-indigo-50 p-2.5 rounded-lg">{uploadStatus}</p>}
-
-              {parsedList.length > 0 && (
-                <div className="space-y-3 border-t pt-4">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <button onClick={() => setPreviewMode(p => !p)} className="px-3.5 py-2 bg-slate-900 text-white rounded-xl text-xs font-bold shadow hover:bg-slate-800 transition">
-                      {previewMode ? '▲ Ẩn Xem Trước Đề' : `👁️ Xem Trước Trực Tiếp (${parsedList.length} câu)`}
-                    </button>
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        onClick={() => downloadExamAsWordDoc(topicName, customExamCode, 'Thầy Trương Trung Can', '50', grade, parsedList)}
-                        className="px-3.5 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold shadow hover:bg-blue-700 transition"
-                      >
-                        📥 Xuất Word (.DOC)
-                      </button>
-                      <button
-                        onClick={() => {
-                          const newExamObj = {
-                            id: Date.now(),
-                            title: topicName.trim() || `Đề Sinh Học Khối ${grade}`,
-                            examCode: customExamCode.trim() || '202',
-                            grade,
-                            createdAt: new Date().toLocaleString('vi-VN'),
-                            questions: parsedList
-                          };
-                          setCustomExams(prev => [newExamObj, ...prev]);
-                          showToast(`Đã lưu thành bộ đề riêng! Kiểm tra ở tab Kho Đề Đã Lưu.`);
-                        }}
-                        className="px-3.5 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold shadow hover:bg-emerald-700 transition"
-                      >
-                        💾 Lưu Vào Kho Đề Riêng
-                      </button>
-                    </div>
-                  </div>
-
-                  {previewMode && (
-                    <div className="p-4 bg-slate-50 border rounded-xl space-y-4 max-h-[500px] overflow-y-auto">
-                      <h4 className="font-bold text-xs text-emerald-800 uppercase border-b pb-2">Nội dung xem trước đề thi ({parsedList.length} câu):</h4>
-                      {parsedList.map((q, qIndex) => (
-                        <div key={q.id || qIndex} className="p-3.5 bg-white border rounded-xl space-y-2 text-xs">
-                          <p className="font-bold text-slate-800">Câu {qIndex + 1}: {q.question}</p>
-                          <div className="space-y-1 pl-3">
-                            {(q.options || []).map((opt, oIdx) => (
-                              <div key={oIdx} className={q.correct === oIdx ? 'text-emerald-700 font-bold' : 'text-slate-700'}>
-                                <b>{String.fromCharCode(65 + oIdx)}.</b> {opt} {q.correct === oIdx && '✓ (Đúng)'}
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
+          {role === 'teacher' && (
+            <button
+              onClick={() => setEditingQuestion({
+                type: 'MCQ',
+                grade: '12',
+                topicId: 'cd1',
+                level: 'Thông hiểu',
+                source: 'Giáo viên biên soạn',
+                content: '',
+                options: ['', '', '', ''],
+                correctAnswer: 'A',
+                subItems: [
+                  { id: 'a', text: '', answer: true },
+                  { id: 'b', text: '', answer: false },
+                  { id: 'c', text: '', answer: true },
+                  { id: 'd', text: '', answer: false }
+                ],
+                explanation: ''
+              })}
+              className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-sm flex items-center gap-1.5 shadow-sm"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Thêm câu hỏi mới</span>
+            </button>
           )}
+        </div>
 
-          {subTab === 'customExams' && (
-            <div className="bg-white p-5 rounded-2xl border space-y-4">
-              <h3 className="font-bold text-sm text-slate-800">📁 Kho Đề Sinh Học Riêng Của Giáo Viên (Có Thể Xem Trước &amp; Sửa Trực Tiếp)</h3>
-              {customExams.length === 0 ? (
-                <p className="text-xs text-slate-400 text-center py-8">Chưa có bộ đề nào được lưu.</p>
-              ) : (
-                <div className="space-y-3">
-                  {customExams.map((ex, eIdx) => {
-                    const isEditing = editingExamId === ex.id;
-                    const isPreviewing = viewingExamId === ex.id;
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          {TOPICS_12.map((t) => {
+            const count = topicCounts[t.id] || 0;
+            const pct = Math.min(100, Math.round((count / 50) * 100));
+            return (
+              <div key={t.id} className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/60 flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between text-xs font-bold mb-1">
+                    <span className="text-emerald-700">Lớp {t.grade}</span>
+                    <span className={count >= 50 ? 'text-emerald-600' : 'text-amber-600'}>{count}/50 câu</span>
+                  </div>
+                  <p className="text-xs font-semibold text-slate-800 line-clamp-2 mb-2" title={t.name}>{t.short}</p>
+                  <div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden mb-3">
+                    <div className="h-full bg-emerald-500 transition-all" style={{ width: `${pct}%` }} />
+                  </div>
+                </div>
+                {role === 'teacher' && count < 50 && (
+                  <button
+                    disabled={isGeneratingBulk}
+                    onClick={() => handleAutoFillTo50(t)}
+                    className="w-full py-1.5 px-2.5 rounded-lg bg-white hover:bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-semibold flex items-center justify-center gap-1 transition-all disabled:opacity-50"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>AI bổ sung (+{Math.min(10, 50 - count)} câu)</span>
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Bộ lọc & Thanh công cụ thao tác hàng loạt của Giáo viên */}
+      <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-200 space-y-3">
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
+          <div className="md:col-span-5 relative">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Tìm kiếm nội dung câu hỏi, nguồn đề..."
+              className="w-full pl-10 pr-4 py-2 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+            />
+          </div>
+          <div className="md:col-span-4">
+            <select
+              value={filterTopic}
+              onChange={(e) => setFilterTopic(e.target.value)}
+              className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm outline-none"
+            >
+              <option value="all">Tất cả chủ đề (Khối 10 - 11 - 12)</option>
+              {TOPICS_12.map((t) => (
+                <option key={t.id} value={t.id}>[Lớp {t.grade}] {t.short}</option>
+              ))}
+            </select>
+          </div>
+          <div className="md:col-span-3">
+            <select
+              value={filterType}
+              onChange={(e) => setFilterType(e.target.value)}
+              className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm outline-none"
+            >
+              <option value="all">Tất cả dạng câu hỏi</option>
+              <option value="MCQ">Dạng I: Trắc nghiệm 4 lựa chọn</option>
+              <option value="TF">Dạng II: Trắc nghiệm Đúng / Sai</option>
+              <option value="SHORT">Dạng III: Trả lời ngắn</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Thanh hành động hàng loạt cho Giáo viên */}
+        {role === 'teacher' && (
+          <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100">
+            <label className="flex items-center gap-2 text-sm font-medium text-slate-700 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={filteredQuestions.length > 0 && selectedIds.length === filteredQuestions.length}
+                onChange={toggleSelectAll}
+                className="w-4 h-4 rounded text-emerald-600"
+              />
+              <span>Chọn tất cả ({selectedIds.length}/{filteredQuestions.length} câu đang hiển thị)</span>
+            </label>
+
+            {selectedIds.length > 0 && (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setShowBatchEditModal(true)}
+                  className="px-3.5 py-1.5 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-900 text-xs font-bold flex items-center gap-1.5"
+                >
+                  <Edit3 className="w-3.5 h-3.5" />
+                  <span>Sửa hàng loạt ({selectedIds.length})</span>
+                </button>
+                <button
+                  onClick={handleBulkDelete}
+                  className="px-3.5 py-1.5 rounded-lg bg-rose-100 hover:bg-rose-200 text-rose-800 text-xs font-bold flex items-center gap-1.5"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Xóa hàng loạt ({selectedIds.length})</span>
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Danh sách câu hỏi */}
+      <div className="space-y-4">
+        {filteredQuestions.map((q, idx) => {
+          const topicName = TOPICS_12.find((t) => t.id === q.topicId)?.short || q.topicId;
+          const isChecked = selectedIds.includes(q.id);
+          return (
+            <div key={q.id} className={`bg-white rounded-2xl p-5 shadow-sm border transition-all ${
+              isChecked ? 'border-emerald-500 ring-2 ring-emerald-500/20' : 'border-slate-200'
+            }`}>
+              <div className="flex flex-wrap items-start justify-between gap-3 mb-2.5">
+                <div className="flex flex-wrap items-center gap-2">
+                  {role === 'teacher' && (
+                    <input
+                      type="checkbox"
+                      checked={isChecked}
+                      onChange={() => {
+                        setSelectedIds((prev) =>
+                          prev.includes(q.id) ? prev.filter((item) => item !== q.id) : [...prev, q.id]
+                        );
+                      }}
+                      className="w-4 h-4 rounded text-emerald-600 mr-1"
+                    />
+                  )}
+                  <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-slate-800 text-white">#{idx + 1}</span>
+                  <span className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-emerald-100 text-emerald-800">{topicName}</span>
+                  <span className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-sky-100 text-sky-800">
+                    {q.type === 'MCQ' ? '4 Lựa chọn' : q.type === 'TF' ? 'Đúng / Sai' : 'Trả lời ngắn'}
+                  </span>
+                  <span className="text-xs text-slate-400">{q.source}</span>
+                </div>
+
+                {role === 'teacher' && (
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={() => setEditingQuestion(q)}
+                      className="p-1.5 text-slate-600 hover:bg-slate-100 rounded-lg"
+                      title="Chỉnh sửa câu hỏi"
+                    >
+                      <Edit3 className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={async () => {
+                        await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'questions', q.id));
+                        showToast('Đã xóa câu hỏi!', 'info');
+                      }}
+                      className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg"
+                      title="Xóa câu hỏi"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              <p className="text-slate-800 font-medium text-sm sm:text-base mb-3 whitespace-pre-line">{q.content}</p>
+
+              {q.type === 'MCQ' && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm mb-3">
+                  {(q.options || []).map((opt, i) => {
+                    const letter = ['A', 'B', 'C', 'D'][i];
+                    const isAns = q.correctAnswer === letter;
                     return (
-                      <div key={ex.id} className="p-4 bg-slate-50 border rounded-xl space-y-3">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <div>
-                            <span className="px-2 py-0.5 bg-indigo-100 text-indigo-800 rounded font-mono text-[11px] font-bold">Mã đề: {ex.examCode}</span>
-                            <h4 className="font-bold text-sm text-slate-800 mt-1">{eIdx + 1}. {ex.title} ({ex.questions.length} câu)</h4>
-                          </div>
-                          <div className="flex flex-wrap gap-2">
-                            <button
-                              onClick={() => setViewingExamId(isPreviewing ? null : ex.id)}
-                              className="px-3 py-1.5 bg-slate-800 text-white rounded-lg text-xs font-bold"
-                            >
-                              {isPreviewing ? '👁️ Đóng Xem Trước' : '👁️ Xem Trước Đề'}
-                            </button>
-                            <button
-                              onClick={() => {
-                                if (isEditing) {
-                                  setCustomExams(prev => prev.map(item => item.id === ex.id ? { ...item, questions: editingQuestions } : item));
-                                  setEditingExamId(null);
-                                  showToast('Đã lưu chỉnh sửa câu hỏi!');
-                                } else {
-                                  setEditingExamId(ex.id);
-                                  setEditingQuestions(JSON.parse(JSON.stringify(ex.questions)));
-                                }
-                              }}
-                              className="px-3 py-1.5 bg-amber-600 text-white rounded-lg text-xs font-bold"
-                            >
-                              {isEditing ? '💾 Lưu Chỉnh Sửa' : '✏️ Sửa Đề Này'}
-                            </button>
-                            <button
-                              onClick={() => downloadExamAsWordDoc(ex.title, ex.examCode, 'Thầy Trương Trung Can', '50', ex.grade, isEditing ? editingQuestions : ex.questions)}
-                              className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-bold"
-                            >
-                              📥 Xuất Word
-                            </button>
-                            <button
-                              onClick={() => setCustomExams(prev => prev.filter(item => item.id !== ex.id))}
-                              className="px-3 py-1.5 bg-rose-50 text-rose-600 border rounded-lg text-xs font-bold"
-                            >
-                              Xóa
-                            </button>
-                          </div>
-                        </div>
-
-                        {isPreviewing && !isEditing && (
-                          <div className="space-y-3 border-t pt-3 max-h-96 overflow-y-auto bg-white p-3 rounded-xl border">
-                            {ex.questions.map((q, qi) => (
-                              <div key={qi} className="p-3 bg-slate-50 border rounded-lg space-y-1.5 text-xs">
-                                <p className="font-bold text-slate-800">Câu {qi + 1}: {q.question}</p>
-                                <div className="space-y-1 pl-3">
-                                  {(q.options || []).map((opt, oi) => (
-                                    <div key={oi} className={q.correct === oi ? 'text-emerald-700 font-bold' : 'text-slate-700'}>
-                                      <b>{String.fromCharCode(65 + oi)}.</b> {opt} {q.correct === oi && '✓ (Đúng)'}
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-
-                        {isEditing ? (
-                          <div className="space-y-3 border-t pt-3 max-h-96 overflow-y-auto">
-                            {editingQuestions.map((q, qi) => (
-                              <div key={qi} className="p-3 bg-white border rounded-lg space-y-2 text-xs">
-                                <label className="font-bold text-emerald-800">Câu {qi + 1}:</label>
-                                <textarea
-                                  rows={2}
-                                  value={q.question}
-                                  onChange={e => {
-                                    const nextQ = [...editingQuestions];
-                                    nextQ[qi].question = e.target.value;
-                                    setEditingQuestions(nextQ);
-                                  }}
-                                  className="w-full p-2 border rounded"
-                                />
-                                {(q.options || []).map((opt, oi) => (
-                                  <div key={oi} className="flex items-center gap-2">
-                                    <input
-                                      type="radio"
-                                      checked={q.correct === oi}
-                                      onChange={() => {
-                                        const nextQ = [...editingQuestions];
-                                        nextQ[qi].correct = oi;
-                                        setEditingQuestions(nextQ);
-                                      }}
-                                    />
-                                    <input
-                                      type="text"
-                                      value={opt}
-                                      onChange={e => {
-                                        const nextQ = [...editingQuestions];
-                                        nextQ[qi].options[oi] = e.target.value;
-                                        setEditingQuestions(nextQ);
-                                      }}
-                                      className="flex-1 p-1 border rounded"
-                                    />
-                                  </div>
-                                ))}
-                              </div>
-                            ))}
-                          </div>
-                        ) : null}
+                      <div key={letter} className={`px-3 py-2 rounded-lg border ${
+                        isAns ? 'bg-emerald-50 border-emerald-400 text-emerald-900 font-semibold' : 'bg-slate-50 border-slate-200 text-slate-700'
+                      }`}>
+                        <strong>{letter}.</strong> {opt}
                       </div>
                     );
                   })}
                 </div>
               )}
-            </div>
-          )}
 
-          {subTab === 'results' && (
-            <div className="bg-white p-5 rounded-2xl border space-y-3">
-              <h3 className="font-bold text-sm">Kết Quả Học Sinh Làm Bài ({submissions.length})</h3>
-              {submissions.length === 0 ? (
-                <p className="text-xs text-slate-400 text-center py-8">Chưa có bài nộp.</p>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse text-xs">
-                    <thead>
-                      <tr className="bg-slate-100 border-b">
-                        <th className="p-2.5">Họ Tên</th>
-                        <th className="p-2.5">Lớp</th>
-                        <th className="p-2.5">Chủ Đề</th>
-                        <th className="p-2.5">Điểm</th>
-                        <th className="p-2.5">Thời Gian</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y">
-                      {submissions.map(s => (
-                        <tr key={s.id}>
-                          <td className="p-2.5 font-bold">{s.name}</td>
-                          <td className="p-2.5">{s.className}</td>
-                          <td className="p-2.5">{s.topic}</td>
-                          <td className="p-2.5 font-bold text-emerald-700">{s.score}/{s.total}</td>
-                          <td className="p-2.5 text-slate-400">{s.submittedAt}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+              {q.type === 'TF' && (
+                <div className="space-y-1.5 text-sm mb-3">
+                  {(q.subItems || []).map((sub) => (
+                    <div key={sub.id} className="flex items-center justify-between px-3 py-1.5 rounded-lg bg-slate-50 border border-slate-200">
+                      <span><strong className="uppercase text-emerald-700">{sub.id})</strong> {sub.text}</span>
+                      <span className={`text-xs font-bold px-2 py-0.5 rounded ${sub.answer ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
+                        {sub.answer ? 'ĐÚNG' : 'SAI'}
+                      </span>
+                    </div>
+                  ))}
                 </div>
               )}
+
+              {q.type === 'SHORT' && (
+                <div className="text-sm mb-3">
+                  <span className="font-semibold text-slate-600">Đáp án chuẩn: </span>
+                  <span className="font-mono font-bold bg-emerald-100 text-emerald-800 px-2.5 py-0.5 rounded">{q.correctAnswer}</span>
+                </div>
+              )}
+
+              {q.explanation && (
+                <p className="text-xs text-slate-600 bg-amber-50/70 p-2.5 rounded-lg border border-amber-200/70">
+                  <strong>Giải thích:</strong> {q.explanation}
+                </p>
+              )}
             </div>
-          )}
-        </div>
-      );
-    }
+          );
+        })}
+      </div>
 
-    function ExporterView({ questions, customExams, selectedGrade, setSelectedGrade }) {
-      const [selectedCustomExamId, setSelectedCustomExamId] = useState('');
-      const [examCode, setExamCode] = useState('101');
-
-      const matchingCustomExams = useMemo(() => (customExams || []).filter(ex => ex.grade === selectedGrade), [customExams, selectedGrade]);
-      const activeCustomExam = useMemo(() => matchingCustomExams.find(ex => String(ex.id) === String(selectedCustomExamId)) || null, [matchingCustomExams, selectedCustomExamId]);
-
-      const exportList = useMemo(() => {
-        if (activeCustomExam) return activeCustomExam.questions;
-        return questions.filter(q => q.subject === 'Sinh học' && q.grade === selectedGrade);
-      }, [questions, activeCustomExam, selectedGrade]);
-
-      return (
-        <div className="space-y-4">
-          <div className="bg-white p-4 rounded-xl border flex flex-wrap gap-2 items-center print:hidden">
-            <select value={selectedGrade} onChange={e => { setSelectedGrade(e.target.value); setSelectedCustomExamId(''); }} className="p-2 border rounded-lg text-xs bg-white font-bold">
-              <option value="12">Khối 12</option>
-              <option value="11">Khối 11</option>
-              <option value="10">Khối 10</option>
-            </select>
-            {matchingCustomExams.length > 0 && (
+      {/* MODAL SỬA HÀNG LOẠT */}
+      {showBatchEditModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4">
+            <h3 className="text-lg font-bold text-slate-900">Sửa đồng loạt {selectedIds.length} câu hỏi</h3>
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Chuyển sang chuyên đề</label>
               <select
-                value={selectedCustomExamId}
-                onChange={e => {
-                  setSelectedCustomExamId(e.target.value);
-                  const found = matchingCustomExams.find(ex => String(ex.id) === String(e.target.value));
-                  if (found) setExamCode(found.examCode || '202');
-                }}
-                className="p-2 border border-indigo-300 rounded-lg text-xs bg-indigo-50 font-bold text-indigo-900"
+                value={batchTopic}
+                onChange={(e) => setBatchTopic(e.target.value)}
+                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300"
               >
-                <option value="">Nguồn: Ngân hàng mặc định</option>
-                {matchingCustomExams.map(ex => (
-                  <option key={ex.id} value={ex.id}>📁 Đề riêng: {ex.title} (Mã {ex.examCode})</option>
+                {TOPICS_12.map((t) => (
+                  <option key={t.id} value={t.id}>[Lớp {t.grade}] {t.name}</option>
                 ))}
               </select>
-            )}
-            <input type="text" value={examCode} onChange={e => setExamCode(e.target.value)} className="w-20 p-2 border rounded-lg text-xs font-mono" placeholder="Mã đề" />
-            <div className="ml-auto flex gap-2">
-              <button
-                onClick={() => downloadExamAsWordDoc(activeCustomExam ? activeCustomExam.title : `ĐỀ THI MÔN SINH HỌC KHỐI ${selectedGrade}`, examCode, 'Thầy Trương Trung Can', '50', selectedGrade, exportList)}
-                className="px-3 py-2 bg-blue-600 text-white rounded-lg text-xs font-bold"
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Mức độ nhận thức</label>
+              <select
+                value={batchLevel}
+                onChange={(e) => setBatchLevel(e.target.value)}
+                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300"
               >
-                📥 Tải File Word (.DOC)
-              </button>
-              <button onClick={() => window.print()} className="px-3 py-2 bg-emerald-600 text-white rounded-lg text-xs font-bold">
-                🖨️ In / Lưu PDF
-              </button>
+                <option value="Nhận biết">Nhận biết</option>
+                <option value="Thông hiểu">Thông hiểu</option>
+                <option value="Vận dụng">Vận dụng</option>
+                <option value="Vận dụng cao">Vận dụng cao</option>
+              </select>
             </div>
-          </div>
-
-          <div className="bg-white p-8 rounded-xl border font-serif text-sm space-y-5 print:border-none print:p-0">
-            <div className="text-center border-b-2 border-slate-900 pb-3">
-              <h2 className="font-bold text-base uppercase">{activeCustomExam ? activeCustomExam.title : `ĐỀ KIỂM TRA MÔN SINH HỌC - KHỐI ${selectedGrade}`}</h2>
-              <p className="text-xs italic">Giáo viên: Thầy Trương Trung Can | Mã đề: {examCode}</p>
+            <div className="flex justify-end gap-2 pt-2">
+              <button onClick={() => setShowBatchEditModal(false)} className="px-4 py-2 rounded-xl text-slate-600 hover:bg-slate-100">Hủy</button>
+              <button onClick={handleBulkUpdate} className="px-5 py-2 rounded-xl bg-emerald-600 text-white font-bold">Áp dụng thay đổi</button>
             </div>
-            {exportList.map((q, idx) => (
-              <div key={idx} className="space-y-1.5">
-                <p className="font-bold">Câu {idx + 1}: <span className="font-normal">{q.question}</span></p>
-                <div className="space-y-1 pl-4">
-                  {(q.options || []).map((o, oi) => (
-                    <div key={oi} className="block"><b>{String.fromCharCode(65 + oi)}.</b> {o}</div>
-                  ))}
-                </div>
-              </div>
-            ))}
           </div>
         </div>
-      );
-    }
+      )}
 
-    function BioToolsView() {
-      const [activeToolTab, setActiveToolTab] = useState('terms');
-      const [selectedTopicTerm, setSelectedTopicTerm] = useState('Tất cả chủ đề');
+      {/* MODAL THÊM / CHỈNH SỬA 1 CÂU HỎI */}
+      {editingQuestion && (
+        <QuestionEditorModal
+          question={editingQuestion}
+          onClose={() => setEditingQuestion(null)}
+          onSave={async (savedQ) => {
+            if (savedQ.id) {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'questions', savedQ.id), savedQ);
+              showToast('Đã cập nhật câu hỏi!', 'success');
+            } else {
+              await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'questions'), savedQ);
+              showToast('Đã thêm câu hỏi mới vào ngân hàng!', 'success');
+            }
+            setEditingQuestion(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
 
-      const allTermsList = [
-        // Di truyền phân tử & Cơ chế biến dị (Lớp 12)
-        { topic: 'Di truyền phân tử & Cơ chế biến dị', term: 'Gen', desc: 'Một đoạn DNA mang thông tin mã hóa cho một chuỗi polypeptide hoặc RNA.' },
-        { topic: 'Di truyền phân tử & Cơ chế biến dị', term: 'Mã di truyền', desc: 'Bộ ba nucleotide trên mRNA quy định axit amin tương ứng (có 64 bộ ba).' },
-        { topic: 'Di truyền phân tử & Cơ chế biến dị', term: 'Phiên mã', desc: 'Quá trình tổng hợp RNA dựa trên mạch khuôn DNA dưới sự xúc tác của RNA polymerase.' },
-        { topic: 'Di truyền phân tử & Cơ chế biến dị', term: 'Dịch mã', desc: 'Quá trình tổng hợp chuỗi polypeptide tại ribosome dựa trên khuôn mẫu mRNA.' },
-        { topic: 'Di truyền phân tử & Cơ chế biến dị', term: 'Đột biến gen', desc: 'Những biến đổi nhỏ trong cấu trúc của gene liên quan đến một hoặc một số cặp nucleotide.' },
-        { topic: 'Di truyền phân tử & Cơ chế biến dị', term: 'Operon Lac', desc: 'Cụm gồm các gene điều hòa, vận hành, khởi động và các gene cấu trúc (Z, Y, A) ở vi khuẩn E. coli.' },
+// Modal biên tập chi tiết câu hỏi
+function QuestionEditorModal({ question, onClose, onSave }) {
+  const [form, setForm] = useState({ ...question });
 
-        // Di truyền Nhiễm sắc thể & Quy luật Mendel (Lớp 12)
-        { topic: 'Di truyền Nhiễm sắc thể & Quy luật Mendel', term: 'Allele (Alen)', desc: 'Các trạng thái biểu hiện khác nhau của cùng một gen, nằm ở cùng một locus trên NST.' },
-        { topic: 'Di truyền Nhiễm sắc thể & Quy luật Mendel', term: 'Thể dị bội', desc: 'Cơ thể mà tế bào sinh dưỡng có số lượng NST thay đổi ở một hay một số cặp NST (2n+1, 2n-1).' },
-        { topic: 'Di truyền Nhiễm sắc thể & Quy luật Mendel', term: 'Hoán vị gen', desc: 'Hiện tượng các allele đổi chỗ cho nhau do sự trao đổi chéo giữa các chromatid khác nguồn ở kỳ đầu giảm phân I.' },
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    const topicObj = TOPICS_12.find((t) => t.id === form.topicId);
+    onSave({ ...form, grade: topicObj?.grade || '12' });
+  };
 
-        // Di truyền quần thể & Công nghệ Gen (Lớp 12)
-        { topic: 'Di truyền quần thể & Công nghệ Gen', term: 'Quần thể giao phấn ngẫu nhiên', desc: 'Quần thể trong đó các cá thể tự do giao phối với nhau không phụ thuộc vào kiểu gen.' },
-        { topic: 'Di truyền quần thể & Công nghệ Gen', term: 'Công nghệ gen', desc: 'Quy trình công nghệ dùng để tạo ra những tế bào hoặc sinh vật có gen bị biến đổi hoặc có gen mới.' },
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+      <div className="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl my-8 max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-bold text-slate-900">
+            {form.id ? 'Chỉnh sửa câu hỏi' : 'Thêm câu hỏi mới'}
+          </h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
+        </div>
 
-        // Tiến hóa & Học thuyết hiện đại (Lớp 12)
-        { topic: 'Tiến hóa & Học thuyết hiện đại', term: 'Quần thể thích nghi', desc: 'Quần thể mang các đặc điểm hình thái, sinh lý giúp sinh vật tồn tại và sinh sản trong môi trường sống.' },
-        { topic: 'Tiến hóa & Học thuyết hiện đại', term: 'Chọn lọc tự nhiên', desc: 'Quá trình phân hóa khả năng sống sót và sinh sản của các cá thể với các kiểu gen khác nhau trong quần thể.' },
-
-        // Sinh thái học & Bảo tồn môi trường (Lớp 12)
-        { topic: 'Sinh thái học & Bảo tồn môi trường', term: 'Quần xã sinh vật', desc: 'Tập hợp các quần thể sinh vật thuộc nhiều loài khác nhau, sống trong một không gian và thời gian nhất định.' },
-        { topic: 'Sinh thái học & Bảo tồn môi trường', term: 'Hệ sinh thái', desc: 'Bao gồm quần xã sinh vật và sinh cảnh (môi trường vô cơ của quần xã), tương tác qua lại với nhau.' }
-      ];
-
-      const topicTermCategories = ['Tất cả chủ đề', ...BIOLOGY_TOPICS['12']];
-
-      const filteredTerms = useMemo(() => {
-        if (selectedTopicTerm === 'Tất cả chủ đề') return allTermsList;
-        return allTermsList.filter(t => t.topic === selectedTopicTerm);
-      }, [selectedTopicTerm]);
-
-      const formulasList = [
-        { name: '1. Số lượng Nu & Chiều dài DNA', formula: 'L = (N / 2) × 3.4 Å\nN = (L / 3.4) × 2\nM = N × 300 đvc' },
-        { name: '2. Nguyên tắc bổ sung (NTBS DNA)', formula: 'A = T, G = X\n%A = %T, %G = %X\n%A + %G = 50%' },
-        { name: '3. Số liên kết Hydro (H)', formula: 'H = 2A + 3G' },
-        { name: '4. Số liên kết Hóa trị Phosphodiester', formula: 'HT = N - 2 (trên 2 mạch)' },
-        { name: '5. Số phân tử mRNA & Axit Amin', formula: 'Số phân tử mRNA = k × số lần phiên mã\nSố amino acid tham gia dịch mã = (N/6) - 1' }
-      ];
-
-      const mendelCrosses = [
-        { title: '1. Phép lai: AA x AA', p: 'AA × AA', kg: '1 AA (1)', kh: '1 Trội (1)', type: 'Đồng tính trội' },
-        { title: '2. Phép lai: AA x Aa', p: 'AA × Aa', kg: 'AA : Aa (1:1)', kh: '1 Trội (1)', type: 'Đồng tính trội' },
-        { title: '3. Phép lai: AA x aa', p: 'AA × aa', kg: '1 Aa (1)', kh: '1 Trội (1)', type: 'Đồng tính trội' },
-        { title: '4. Phép lai: Aa x Aa', p: 'Aa × Aa', kg: '1/4 AA : 2/4 Aa : 1/4 aa (1:2:1)', kh: '3/4 Trội : 1/4 Lặn (3:1)', type: 'Phân tính 3:1' },
-        { title: '5. Phép lai: Aa x aa', p: 'Aa × aa', kg: '1/2 Aa : 1/2 aa (1:1)', kh: '1/2 Trội : 1/2 Lặn (1:1)', type: 'Phân tính 1:1' },
-        { title: '6. Phép lai: aa x aa', p: 'aa × aa', kg: '1 aa (1)', kh: '1 Lặn (1)', type: 'Đồng tính lặn' }
-      ];
-
-      return (
-        <div className="space-y-4">
-          <div className="flex flex-wrap border-b gap-3 pb-2 text-xs font-bold">
-            <button onClick={() => setActiveToolTab('terms')} className={`px-4 py-2 rounded-lg ${activeToolTab === 'terms' ? 'bg-emerald-600 text-white' : 'bg-white border'}`}>📖 Thuật Ngữ Sinh Học 12 (Tất Cả Chủ Đề)</button>
-            <button onClick={() => setActiveToolTab('formulas')} className={`px-4 py-2 rounded-lg ${activeToolTab === 'formulas' ? 'bg-emerald-600 text-white' : 'bg-white border'}`}>📐 Công Thức Sinh Học Phân Tử</button>
-            <button onClick={() => setActiveToolTab('crosses')} className={`px-4 py-2 rounded-lg ${activeToolTab === 'crosses' ? 'bg-emerald-600 text-white' : 'bg-white border'}`}>🧬 Bảng 6 Phép Lai Một Tính Trạng Menđen</button>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Chuyên đề</label>
+              <select
+                value={form.topicId}
+                onChange={(e) => setForm({ ...form, topicId: e.target.value })}
+                className="w-full px-3 py-2 rounded-xl border border-slate-300 text-sm"
+              >
+                {TOPICS_12.map((t) => (
+                  <option key={t.id} value={t.id}>[Lớp {t.grade}] {t.short}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Dạng thức câu hỏi</label>
+              <select
+                value={form.type}
+                onChange={(e) => setForm({ ...form, type: e.target.value })}
+                className="w-full px-3 py-2 rounded-xl border border-slate-300 text-sm"
+              >
+                <option value="MCQ">Dạng I: Trắc nghiệm 4 lựa chọn</option>
+                <option value="TF">Dạng II: Trắc nghiệm Đúng / Sai</option>
+                <option value="SHORT">Dạng III: Trả lời ngắn</option>
+              </select>
+            </div>
           </div>
 
-          {activeToolTab === 'terms' && (
-            <div className="space-y-3">
-              <div className="flex flex-wrap gap-2 items-center bg-white p-3 border rounded-xl">
-                <span className="text-xs font-bold text-slate-700">Lọc theo chuyên đề Sinh học 12:</span>
-                <select
-                  value={selectedTopicTerm}
-                  onChange={e => setSelectedTopicTerm(e.target.value)}
-                  className="p-2 border rounded-lg text-xs bg-white font-bold text-emerald-900"
-                >
-                  {topicTermCategories.map(cat => (
-                    <option key={cat} value={cat}>{cat}</option>
-                  ))}
-                </select>
-              </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Nội dung câu hỏi *</label>
+            <textarea
+              required
+              rows={3}
+              value={form.content}
+              onChange={(e) => setForm({ ...form, content: e.target.value })}
+              className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm"
+            />
+          </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {filteredTerms.map((t, idx) => (
-                  <div key={idx} className="p-4 bg-white border rounded-xl space-y-1.5 shadow-sm">
-                    <span className="text-[10px] uppercase font-bold px-2 py-0.5 bg-emerald-50 text-emerald-800 rounded">{t.topic}</span>
-                    <h4 className="font-bold text-emerald-900 text-sm mt-1">{idx + 1}. {t.term}</h4>
-                    <p className="text-xs text-slate-600 leading-relaxed">{t.desc}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {activeToolTab === 'formulas' && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {formulasList.map((f, idx) => (
-                <div key={idx} className="p-4 bg-white border rounded-xl space-y-2">
-                  <h4 className="font-bold text-slate-800 text-sm">{f.name}</h4>
-                  <pre className="p-2.5 bg-slate-50 border rounded-lg text-xs font-mono text-emerald-900 whitespace-pre-wrap">{f.formula}</pre>
+          {form.type === 'MCQ' && (
+            <div className="space-y-2">
+              <label className="block text-xs font-bold text-slate-500 uppercase">Các phương án A, B, C, D & Đáp án đúng</label>
+              {['A', 'B', 'C', 'D'].map((letter, idx) => (
+                <div key={letter} className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="correctMCQ"
+                    checked={form.correctAnswer === letter}
+                    onChange={() => setForm({ ...form, correctAnswer: letter })}
+                  />
+                  <span className="font-bold text-sm w-5">{letter}.</span>
+                  <input
+                    type="text"
+                    required
+                    value={(form.options || [])[idx] || ''}
+                    onChange={(e) => {
+                      const next = [...(form.options || ['', '', '', ''])];
+                      next[idx] = e.target.value;
+                      setForm({ ...form, options: next });
+                    }}
+                    className="flex-1 px-3 py-1.5 rounded-lg border border-slate-300 text-sm"
+                  />
                 </div>
               ))}
             </div>
           )}
 
-          {activeToolTab === 'crosses' && (
-            <div className="bg-white p-5 rounded-2xl border space-y-4">
-              <div className="border-b pb-3">
-                <h3 className="font-bold text-sm text-slate-800">DI TRUYỀN HỌC MENĐEN - QUY LUẬT PHÂN LI</h3>
-                <p className="text-xs text-slate-500">Bảng 6 Phép Lai Một Tính Trạng (Quy ước: Gen A trội hoàn toàn so với a)</p>
-              </div>
-
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse text-xs">
-                  <thead>
-                    <tr className="bg-slate-100 border-b">
-                      <th className="p-3 border">STT</th>
-                      <th className="p-3 border">Phép lai (P)</th>
-                      <th className="p-3 border">Tỉ lệ kiểu gen (F1)</th>
-                      <th className="p-3 border">Tỉ lệ kiểu hình (F1)</th>
-                      <th className="p-3 border">Tính chất</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {mendelCrosses.map((c, idx) => (
-                      <tr key={idx} className="hover:bg-slate-50">
-                        <td className="p-3 border font-bold text-center">{idx + 1}</td>
-                        <td className="p-3 border font-mono font-bold text-emerald-800">{c.p}</td>
-                        <td className="p-3 border font-mono">{c.kg}</td>
-                        <td className="p-3 border">{c.kh}</td>
-                        <td className="p-3 border font-bold text-indigo-700">{c.type}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+          {form.type === 'TF' && (
+            <div className="space-y-2">
+              <label className="block text-xs font-bold text-slate-500 uppercase">4 Mệnh đề Đúng / Sai</label>
+              {(form.subItems || []).map((sub, idx) => (
+                <div key={sub.id} className="flex items-center gap-2">
+                  <span className="font-bold uppercase text-sm w-5">{sub.id})</span>
+                  <input
+                    type="text"
+                    required
+                    value={sub.text}
+                    onChange={(e) => {
+                      const next = [...form.subItems];
+                      next[idx] = { ...sub, text: e.target.value };
+                      setForm({ ...form, subItems: next });
+                    }}
+                    className="flex-1 px-3 py-1.5 rounded-lg border border-slate-300 text-sm"
+                  />
+                  <select
+                    value={sub.answer ? 'true' : 'false'}
+                    onChange={(e) => {
+                      const next = [...form.subItems];
+                      next[idx] = { ...sub, answer: e.target.value === 'true' };
+                      setForm({ ...form, subItems: next });
+                    }}
+                    className="px-2 py-1.5 rounded-lg border border-slate-300 text-xs font-bold"
+                  >
+                    <option value="true">Đúng</option>
+                    <option value="false">Sai</option>
+                  </select>
+                </div>
+              ))}
             </div>
           )}
-        </div>
-      );
+
+          {form.type === 'SHORT' && (
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Đáp số chính xác</label>
+              <input
+                type="text"
+                required
+                value={form.correctAnswer}
+                onChange={(e) => setForm({ ...form, correctAnswer: e.target.value })}
+                className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm font-mono font-bold"
+              />
+            </div>
+          )}
+
+          <div>
+            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Hướng dẫn giải chi tiết</label>
+            <textarea
+              rows={2}
+              value={form.explanation || ''}
+              onChange={(e) => setForm({ ...form, explanation: e.target.value })}
+              className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm"
+            />
+          </div>
+
+          <div className="flex justify-end gap-2 pt-3 border-t">
+            <button type="button" onClick={onClose} className="px-4 py-2 rounded-xl text-slate-600 hover:bg-slate-100">Hủy</button>
+            <button type="submit" className="px-5 py-2 rounded-xl bg-emerald-600 text-white font-bold">Lưu câu hỏi</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ==========================================
+// 8. MODULE 3: SOẠN ĐỀ TỪ FILE GỐC & NHÂN BẢN ĐỀ TƯƠNG TỰ BẰNG AI GEMINI
+// ==========================================
+function ExamGeneratorSection({ questions, exams, showToast }) {
+  const [rawContent, setRawContent] = useState('');
+  const [parsedQuestions, setParsedQuestions] = useState([]);
+  const [examTitle, setExamTitle] = useState('Đề Luyện Tập Sinh Học 12 - Chuẩn TNTHPT 2026');
+  const [examDuration, setExamDuration] = useState(50);
+  const [isProcessing, setIsProcessing] = useState(false);
+
+  // Đọc file .docx (giữ nguyên định dạng màu đỏ, gạch chân, bảng đáp án) hoặc .txt
+  const handleFileUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      if (file.name.endsWith('.docx')) {
+        if (!window.mammoth) {
+          showToast('Đang tải thư viện đọc file Word, vui lòng thử lại sau 2 giây!', 'info');
+          return;
+        }
+        const arrayBuffer = await file.arrayBuffer();
+        // Chuyển đổi sang HTML để bảo toàn thẻ <u> (gạch chân) và màu sắc/in đậm
+        const result = await window.mammoth.convertToHtml({ arrayBuffer });
+        const annotatedText = extractAnnotatedTextFromHtml(result.value);
+        setRawContent(annotatedText);
+        setExamTitle(file.name.replace(/\.docx$/i, ''));
+        showToast('Đã trích xuất nội dung file Word (bao gồm nhận diện gạch chân / tô đậm / đáp án)!', 'success');
+      } else {
+        const text = await file.text();
+        setRawContent(text);
+        setExamTitle(file.name.replace(/\.[^/.]+$/, ''));
+        showToast('Đã đọc nội dung file văn bản!', 'success');
+      }
+    } catch (err) {
+      console.error(err);
+      showToast('Không thể đọc file. Vui lòng kiểm tra định dạng .docx hoặc .txt!', 'error');
+    }
+  };
+
+  // Chuyển HTML từ Mammoth thành văn bản có đánh dấu [ĐÁP ÁN TÔ ĐỎ/GẠCH CHÂN] để AI không bao giờ làm mất đáp án
+  const extractAnnotatedTextFromHtml = (htmlString) => {
+    const parser = new DOMParser();
+    const docHtml = parser.parseFromString(htmlString, 'text/html');
+
+    docHtml.querySelectorAll('u, ins').forEach((el) => {
+      el.textContent = ` [GẠCH_CHÂN: ${el.textContent}] `;
+    });
+
+    docHtml.querySelectorAll('[style*="color"]').forEach((el) => {
+      const style = el.getAttribute('style') || '';
+      if (style.includes('red') || style.includes('#ff0000') || style.includes('rgb(255, 0, 0)')) {
+        el.textContent = ` [TÔ_ĐỎ: ${el.textContent}] `;
+      }
+    });
+
+    return docHtml.body.innerText || docHtml.body.textContent || '';
+  };
+
+  // Dùng AI Gemini phân tích đề gốc -> nhận diện chính xác 3 dạng câu hỏi & bảo toàn đáp án
+  const handleParseOriginalExam = async () => {
+    if (!rawContent.trim()) {
+      showToast('Vui lòng tải file đề gốc hoặc dán nội dung đề thi vào khung!', 'error');
+      return;
     }
 
-    const root = ReactDOM.createRoot(document.getElementById('root'));
-    root.render(
-      <ErrorBoundary>
-        <App />
-      </ErrorBoundary>
-    );
-  </script>
-</body>
-</html>
-```
-eof
+    setIsProcessing(true);
+    showToast('AI Gemini đang phân tích cấu trúc, dạng câu hỏi và trích xuất đáp án...', 'info');
+
+    try {
+      const prompt = `Bạn là hệ thống số hóa đề thi Sinh học THPT chuyên nghiệp. Hãy phân tích văn bản đề thi dưới đây thành danh sách các câu hỏi có cấu trúc chuẩn.
+QUY TẮC QUAN TRỌNG VỀ NHẬN DIỆN DẠNG CÂU HỎI VÀ ĐÁP ÁN:
+1. Nhận diện chính xác 3 dạng câu hỏi:
+   - "MCQ": Câu hỏi có 4 lựa chọn A, B, C, D.
+   - "TF": Câu hỏi Đúng/Sai có các ý a), b), c), d).
+   - "SHORT": Câu hỏi trả lời ngắn (yêu cầu điền đáp số).
+2. Nhận diện đáp án đúng (TUYỆT ĐỐI KHÔNG LÀM MẤT ĐÁP ÁN):
+   - Dựa vào dấu hiệu [TÔ_ĐỎ: ...], [GẠCH_CHÂN: ...], dấu * trước đáp án, hoặc đối chiếu với Bảng đáp án ở cuối đề.
+   - Với MCQ: trả về correctAnswer là "A", "B", "C" hoặc "D".
+   - Với TF: trả về subItems gồm 4 phần tử {id: "a"|"b"|"c"|"d", text: "...", answer: true/false}.
+   - Với SHORT: trả về correctAnswer là giá trị số/chuỗi ngắn gọn.
+3. Bổ sung lời giải ngắn gọn nếu đề gốc chưa có.
+
+Nội dung đề gốc:
+"""
+${rawContent.slice(0, 25000)}
+"""`;
+
+      const schema = {
+        type: "ARRAY",
+        items: {
+          type: "OBJECT",
+          properties: {
+            type: { type: "STRING" },
+            topicId: { type: "STRING" },
+            content: { type: "STRING" },
+            options: { type: "ARRAY", items: { type: "STRING" } },
+            subItems: {
+              type: "ARRAY",
+              items: {
+                type: "OBJECT",
+                properties: {
+                  id: { type: "STRING" },
+                  text: { type: "STRING" },
+                  answer: { type: "BOOLEAN" }
+                }
+              }
+            },
+            correctAnswer: { type: "STRING" },
+            explanation: { type: "STRING" }
+          },
+          required: ["type", "content"]
+        }
+      };
+
+      const result = await callGeminiAPI(prompt, "Phân tích chính xác đề thi Sinh học THPT.", schema);
+      const formatted = result.map((q, i) => ({
+        ...q,
+        id: 'parsed_' + Date.now() + '_' + i,
+        topicId: TOPICS_12.some((t) => t.id === q.topicId) ? q.topicId : 'cd1',
+        source: 'Đề gốc Giáo viên tải lên'
+      }));
+      setParsedQuestions(formatted);
+      showToast(`Đã nhận diện thành công ${formatted.length} câu hỏi cùng đầy đủ đáp án!`, 'success');
+    } catch (err) {
+      console.error(err);
+      showToast('Lỗi khi phân tích đề gốc. Vui lòng thử lại!', 'error');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  // Dùng AI Gemini tạo ĐỀ TƯƠNG TỰ (đổi số liệu, đổi tình huống sinh học, giữ nguyên ma trận kiến thức)
+  const handleGenerateSimilarExam = async () => {
+    const sourceList = parsedQuestions.length > 0 ? parsedQuestions : null;
+    if (!sourceList && !rawContent.trim()) {
+      showToast('Hãy nạp đề gốc hoặc phân tích đề gốc trước khi tạo đề tương tự!', 'error');
+      return;
+    }
+
+    setIsProcessing(true);
+    showToast('AI Gemini đang biến đổi số liệu và tình huống để tạo đề tương tự mới...', 'info');
+
+    try {
+      const baseText = sourceList
+        ? JSON.stringify(sourceList.map(({ type, content, options, subItems, correctAnswer }) => ({ type, content, options, subItems, correctAnswer })))
+        : rawContent.slice(0, 20000);
+
+      const prompt = `Hãy đóng vai chuyên gia ra đề thi TNTHPT môn Sinh học. Dựa trên bộ câu hỏi gốc dưới đây, hãy tạo ra một ĐỀ THI TƯƠNG TỰ HOÀN TOÀN MỚI:
+- Giữ nguyên cấu trúc, dạng câu hỏi ("MCQ", "TF", "SHORT") và mức độ kiến thức của từng câu.
+- THAY ĐỔI SỐ LIỆU tính toán (ví dụ: đổi chiều dài gene, số liên kết H, tần số hoán vị gene, cấu trúc di truyền quần thể, năng lượng hệ sinh thái...) và tính lại đáp án chính xác 100%.
+- THAY ĐỔI TÌNH HUỐNG / ĐỐI TƯỢNG sinh học (ví dụ: đổi loài sinh vật, đổi bối cảnh thí nghiệm, diễn đạt lại câu hỏi lý thuyết để tránh trùng lặp máy móc).
+- Cung cấp lời giải chi tiết theo số liệu mới.
+
+Dữ liệu đề gốc:
+${baseText}`;
+
+      const schema = {
+        type: "ARRAY",
+        items: {
+          type: "OBJECT",
+          properties: {
+            type: { type: "STRING" },
+            topicId: { type: "STRING" },
+            content: { type: "STRING" },
+            options: { type: "ARRAY", items: { type: "STRING" } },
+            subItems: {
+              type: "ARRAY",
+              items: {
+                type: "OBJECT",
+                properties: {
+                  id: { type: "STRING" },
+                  text: { type: "STRING" },
+                  answer: { type: "BOOLEAN" }
+                }
+              }
+            },
+            correctAnswer: { type: "STRING" },
+            explanation: { type: "STRING" }
+          },
+          required: ["type", "content", "explanation"]
+        }
+      };
+
+      const cloned = await callGeminiAPI(prompt, "Tạo đề thi Sinh học tương tự chuẩn xác về khoa học và toán học.", schema);
+      const formatted = cloned.map((q, i) => ({
+        ...q,
+        id: 'clone_' + Date.now() + '_' + i,
+        topicId: TOPICS_12.some((t) => t.id === q.topicId) ? q.topicId : 'cd1',
+        source: 'Đề tương tự AI Gemini 2026'
+      }));
+      setParsedQuestions(formatted);
+      setExamTitle((prev) => prev.includes('(Đề tương tự)') ? prev : `${prev} (Đề tương tự)`);
+      showToast(`Đã tạo xong ${formatted.length} câu hỏi tương tự với số liệu & tình huống mới!`, 'success');
+    } catch (err) {
+      console.error(err);
+      showToast('Có lỗi khi tạo đề tương tự. Vui lòng thử lại!', 'error');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  // Lưu đề thi đã soạn & xuất bản cho học sinh làm bài + tùy chọn nạp vào ngân hàng
+  const handleSaveAndPublishExam = async (alsoAddToBank = true) => {
+    if (parsedQuestions.length === 0) {
+      showToast('Chưa có câu hỏi nào trong đề để lưu!', 'error');
+      return;
+    }
+
+    try {
+      const newExam = {
+        title: examTitle.trim() || 'Đề Luyện Tập Sinh Học 12',
+        grade: '12',
+        duration: Number(examDuration) || 50,
+        published: true,
+        createdAt: new Date().toISOString(),
+        description: `Đề gồm ${parsedQuestions.length} câu hỏi (Đa dạng thức 2025-2026) được biên soạn và kiểm duyệt bởi Giáo viên.`,
+        questions: parsedQuestions
+      };
+
+      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'exams'), newExam);
+
+      if (alsoAddToBank) {
+        const batch = writeBatch(db);
+        let added = 0;
+        parsedQuestions.forEach((q) => {
+          if (!isDuplicateQuestion(q.content, questions)) {
+            const ref = doc(collection(db, 'artifacts', appId, 'public', 'data', 'questions'));
+            batch.set(ref, { ...q, grade: '12', level: 'Thông hiểu' });
+            added++;
+          }
+        });
+        await batch.commit();
+        showToast(`Đã lưu đề thi cho học sinh luyện tập & nạp ${added} câu mới vào Ngân hàng!`, 'success');
+      } else {
+        showToast('Đã lưu và xuất bản đề thi cho học sinh luyện tập!', 'success');
+      }
+    } catch (err) {
+      console.error(err);
+      showToast('Lỗi khi lưu đề thi!', 'error');
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+          <div>
+            <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+              <Sparkles className="w-6 h-6 text-amber-500" />
+              <span>Trợ lý AI Gemini Soạn Đề & Nhân Bản Đề Tương Tự</span>
+            </h2>
+            <p className="text-sm text-slate-500 mt-1">
+              Hỗ trợ tải file Word (.docx) hoặc văn bản (.txt). Tự động nhận diện đáp án tô đỏ, gạch chân hoặc bảng đáp án cuối đề.
+            </p>
+          </div>
+          <label className="cursor-pointer px-4 py-2.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 font-semibold text-sm flex items-center gap-2 transition-all">
+            <Upload className="w-4 h-4" />
+            <span>Tải file đề gốc (.docx / .txt)</span>
+            <input type="file" accept=".docx,.txt" onChange={handleFileUpload} className="hidden" />
+          </label>
+        </div>
+
+        <textarea
+          rows={7}
+          value={rawContent}
+          onChange={(e) => setRawContent(e.target.value)}
+          placeholder="Dán nội dung đề thi gốc vào đây hoặc tải file .docx lên. Hệ thống tự động giữ lại đánh dấu gạch chân / tô đỏ / bảng đáp án..."
+          className="w-full p-4 rounded-xl border border-slate-300 text-sm font-mono focus:ring-2 focus:ring-emerald-500 outline-none mb-4"
+        />
+
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            disabled={isProcessing}
+            onClick={handleParseOriginalExam}
+            className="px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-900 text-white font-semibold text-sm flex items-center gap-2 disabled:opacity-50"
+          >
+            {isProcessing ? <RefreshCw className="w-4 h-4 animate-spin" /> : <ListChecks className="w-4 h-4" />}
+            <span>1. Trích xuất & Chuẩn hóa Đề gốc</span>
+          </button>
+
+          <button
+            disabled={isProcessing}
+            onClick={handleGenerateSimilarExam}
+            className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-white font-bold text-sm flex items-center gap-2 shadow-md disabled:opacity-50"
+          >
+            {isProcessing ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+            <span>2. Tạo Đề Tương Tự (Đổi số liệu & tình huống)</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Khu vực xem trước, chỉnh sửa đáp án và xuất bản cho học sinh */}
+      {parsedQuestions.length > 0 && (
+        <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 space-y-5">
+          <div className="flex flex-wrap items-end justify-between gap-4 pb-4 border-b border-slate-200">
+            <div className="flex-1 min-w-[260px]">
+              <label className="block text-xs font-bold uppercase text-slate-500 mb-1">Tên đề thi xuất bản cho học sinh</label>
+              <input
+                type="text"
+                value={examTitle}
+                onChange={(e) => setExamTitle(e.target.value)}
+                className="w-full px-4 py-2 rounded-xl border border-slate-300 font-bold text-slate-900"
+              />
+            </div>
+            <div className="w-32">
+              <label className="block text-xs font-bold uppercase text-slate-500 mb-1">Thời gian (phút)</label>
+              <input
+                type="number"
+                value={examDuration}
+                onChange={(e) => setExamDuration(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold"
+              />
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => handleSaveAndPublishExam(true)}
+                className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm flex items-center gap-2 shadow-md"
+              >
+                <Save className="w-4 h-4" />
+                <span>Lưu Đề & Giao Học Sinh ({parsedQuestions.length} câu)</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Danh sách câu hỏi đã nhận diện - Cho phép giáo viên kiểm tra & sửa nhanh đáp án */}
+          <div className="space-y-4">
+            {parsedQuestions.map((q, idx) => (
+              <div key={q.id} className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-xs bg-emerald-700 text-white px-2.5 py-1 rounded">Câu {idx + 1}</span>
+                    <select
+                      value={q.type}
+                      onChange={(e) => {
+                        const next = [...parsedQuestions];
+                        next[idx] = { ...q, type: e.target.value };
+                        setParsedQuestions(next);
+                      }}
+                      className="text-xs font-semibold px-2 py-1 rounded border border-slate-300 bg-white"
+                    >
+                      <option value="MCQ">Dạng I: 4 Lựa chọn</option>
+                      <option value="TF">Dạng II: Đúng / Sai</option>
+                      <option value="SHORT">Dạng III: Trả lời ngắn</option>
+                    </select>
+                  </div>
+                  <button
+                    onClick={() => setParsedQuestions(parsedQuestions.filter((_, i) => i !== idx))}
+                    className="text-rose-500 hover:text-rose-700 text-xs font-semibold flex items-center gap-1"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" /> Xóa câu này
+                  </button>
+                </div>
+
+                <textarea
+                  rows={2}
+                  value={q.content}
+                  onChange={(e) => {
+                    const next = [...parsedQuestions];
+                    next[idx] = { ...q, content: e.target.value };
+                    setParsedQuestions(next);
+                  }}
+                  className="w-full p-2.5 rounded-lg border border-slate-300 bg-white text-sm font-medium"
+                />
+
+                {q.type === 'MCQ' && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {(q.options || []).map((opt, oIdx) => {
+                      const letter = ['A', 'B', 'C', 'D'][oIdx];
+                      const isCorrect = q.correctAnswer === letter;
+                      return (
+                        <div key={letter} className={`flex items-center gap-2 p-2 rounded-lg border ${
+                          isCorrect ? 'bg-emerald-50 border-emerald-500' : 'bg-white border-slate-200'
+                        }`}>
+                          <input
+                            type="radio"
+                            checked={isCorrect}
+                            onChange={() => {
+                              const next = [...parsedQuestions];
+                              next[idx] = { ...q, correctAnswer: letter };
+                              setParsedQuestions(next);
+                            }}
+                          />
+                          <strong className="text-xs">{letter}.</strong>
+                          <input
+                            type="text"
+                            value={opt}
+                            onChange={(e) => {
+                              const nextOpts = [...q.options];
+                              nextOpts[oIdx] = e.target.value;
+                              const next = [...parsedQuestions];
+                              next[idx] = { ...q, options: nextOpts };
+                              setParsedQuestions(next);
+                            }}
+                            className="flex-1 text-xs bg-transparent outline-none"
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {q.type === 'TF' && (
+                  <div className="space-y-1.5">
+                    {(q.subItems || []).map((sub, sIdx) => (
+                      <div key={sub.id} className="flex items-center gap-2 bg-white p-2 rounded-lg border border-slate-200">
+                        <strong className="text-xs uppercase text-emerald-700">{sub.id})</strong>
+                        <input
+                          type="text"
+                          value={sub.text}
+                          onChange={(e) => {
+                            const nextSubs = [...q.subItems];
+                            nextSubs[sIdx] = { ...sub, text: e.target.value };
+                            const next = [...parsedQuestions];
+                            next[idx] = { ...q, subItems: nextSubs };
+                            setParsedQuestions(next);
+                          }}
+                          className="flex-1 text-xs outline-none"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const nextSubs = [...q.subItems];
+                            nextSubs[sIdx] = { ...sub, answer: !sub.answer };
+                            const next = [...parsedQuestions];
+                            next[idx] = { ...q, subItems: nextSubs };
+                            setParsedQuestions(next);
+                          }}
+                          className={`px-2.5 py-1 rounded text-xs font-bold ${
+                            sub.answer ? 'bg-emerald-600 text-white' : 'bg-rose-600 text-white'
+                          }`}
+                        >
+                          {sub.answer ? 'Đúng' : 'Sai'}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {q.type === 'SHORT' && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-slate-600">Đáp án ngắn:</span>
+                    <input
+                      type="text"
+                      value={q.correctAnswer || ''}
+                      onChange={(e) => {
+                        const next = [...parsedQuestions];
+                        next[idx] = { ...q, correctAnswer: e.target.value };
+                        setParsedQuestions(next);
+                      }}
+                      className="px-3 py-1 rounded border border-emerald-400 bg-emerald-50 font-mono font-bold text-sm"
+                    />
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ==========================================
+// 9. MODULE 4: TIỆN ÍCH SINH HỌC 12 (THUẬT NGỮ, CÔNG THỨC, KHÁI NIỆM & MÁY TÍNH GEN)
+// ==========================================
+function UtilitiesSection({ utilities, role, showToast }) {
+  const [subTab, setSubTab] = useState('formula'); // 'formula' | 'term' | 'concept' | 'calculator'
+  const [search, setSearch] = useState('');
+  const [editingItem, setEditingItem] = useState(null);
+
+  // Máy tính nhanh bài tập phân tử DNA / Gene
+  const [calcLengthNm, setCalcLengthNm] = useState(408);
+  const [calcA, setCalcA] = useState(480);
+
+  const calcResult = useMemo(() => {
+    const L_angstrom = Number(calcLengthNm) * 10;
+    const N = Math.round((2 * L_angstrom) / 3.4);
+    const A = Number(calcA);
+    const G = Math.max(0, Math.round(N / 2 - A));
+    const H = 2 * A + 3 * G;
+    const C = N / 20;
+    const M = N * 300;
+    return { N, A, T: A, G, X: G, H, C, M };
+  }, [calcLengthNm, calcA]);
+
+  const filteredList = utilities.filter((u) => {
+    const matchCat = u.category === subTab;
+    const matchSearch = !search.trim() ||
+      u.title.toLowerCase().includes(search.toLowerCase()) ||
+      u.content.toLowerCase().includes(search.toLowerCase());
+    return matchCat && matchSearch;
+  });
+
+  return (
+    <div className="space-y-6">
+      {/* Thanh chuyển mục tiện ích */}
+      <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => setSubTab('formula')}
+            className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${
+              subTab === 'formula' ? 'bg-emerald-600 text-white shadow-sm' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+            }`}
+          >
+            Công thức Giải nhanh 12
+          </button>
+          <button
+            onClick={() => setSubTab('term')}
+            className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${
+              subTab === 'term' ? 'bg-emerald-600 text-white shadow-sm' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+            }`}
+          >
+            Từ điển Thuật ngữ Sinh 12
+          </button>
+          <button
+            onClick={() => setSubTab('concept')}
+            className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${
+              subTab === 'concept' ? 'bg-emerald-600 text-white shadow-sm' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+            }`}
+          >
+            Khái niệm & So sánh trọng tâm
+          </button>
+          <button
+            onClick={() => setSubTab('calculator')}
+            className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${
+              subTab === 'calculator' ? 'bg-amber-500 text-slate-950 shadow-sm' : 'bg-amber-50 text-amber-900 hover:bg-amber-100'
+            }`}
+          >
+            Máy tính Bài tập Phân tử
+          </button>
+        </div>
+
+        {role === 'teacher' && subTab !== 'calculator' && (
+          <button
+            onClick={() => setEditingItem({ category: subTab, topic: 'Di truyền phân tử', title: '', content: '' })}
+            className="px-4 py-2 rounded-xl bg-slate-900 text-white text-sm font-semibold flex items-center gap-1.5"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Thêm mục mới</span>
+          </button>
+        )}
+      </div>
+
+      {subTab === 'calculator' ? (
+        <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 max-w-3xl mx-auto">
+          <div className="flex items-center gap-2.5 mb-4">
+            <Calculator className="w-6 h-6 text-emerald-600" />
+            <h3 className="text-lg font-bold text-slate-900">Công cụ Tính nhanh Thông số Cấu trúc DNA / Gene</h3>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+            <div>
+              <label className="block text-xs font-bold uppercase text-slate-500 mb-1">Chiều dài Gene L (nm)</label>
+              <input
+                type="number"
+                value={calcLengthNm}
+                onChange={(e) => setCalcLengthNm(e.target.value)}
+                className="w-full px-4 py-2.5 rounded-xl border border-slate-300 font-mono font-bold"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold uppercase text-slate-500 mb-1">Số lượng Nucleotide loại A</label>
+              <input
+                type="number"
+                value={calcA}
+                onChange={(e) => setCalcA(e.target.value)}
+                className="w-full px-4 py-2.5 rounded-xl border border-slate-300 font-mono font-bold"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 bg-emerald-50/70 p-5 rounded-2xl border border-emerald-200">
+            <div>
+              <span className="text-xs text-slate-500 block">Tổng số Nucleotide (N)</span>
+              <strong className="text-xl font-mono text-emerald-800">{calcResult.N} nu</strong>
+            </div>
+            <div>
+              <span className="text-xs text-slate-500 block">Liên kết Hydrogen (H)</span>
+              <strong className="text-xl font-mono text-emerald-800">{calcResult.H}</strong>
+            </div>
+            <div>
+              <span className="text-xs text-slate-500 block">Số chu kì xoắn (C)</span>
+              <strong className="text-xl font-mono text-emerald-800">{calcResult.C}</strong>
+            </div>
+            <div>
+              <span className="text-xs text-slate-500 block">A = T</span>
+              <strong className="text-lg font-mono text-slate-800">{calcResult.A} nu</strong>
+            </div>
+            <div>
+              <span className="text-xs text-slate-500 block">G = C (X)</span>
+              <strong className="text-lg font-mono text-slate-800">{calcResult.G} nu</strong>
+            </div>
+            <div>
+              <span className="text-xs text-slate-500 block">Khối lượng (M)</span>
+              <strong className="text-lg font-mono text-slate-800">{calcResult.M.toLocaleString()} amu</strong>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="relative max-w-md">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Tra cứu nhanh công thức, thuật ngữ..."
+              className="w-full pl-10 pr-4 py-2 rounded-xl border border-slate-300 bg-white text-sm outline-none"
+            />
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {filteredList.map((item) => (
+              <div key={item.id} className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200 flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-teal-50 text-teal-700 border border-teal-200">
+                      {item.topic}
+                    </span>
+                    {role === 'teacher' && (
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => setEditingItem(item)}
+                          className="p-1.5 text-slate-500 hover:bg-slate-100 rounded-lg"
+                        >
+                          <Edit3 className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={async () => {
+                            await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'utilities', item.id));
+                            showToast('Đã xóa mục tiện ích!', 'info');
+                          }}
+                          className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  <h4 className="font-bold text-slate-900 text-base mb-2">{item.title}</h4>
+                  <p className="text-sm text-slate-700 whitespace-pre-line leading-relaxed bg-slate-50 p-3.5 rounded-xl border border-slate-100">
+                    {item.content}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {/* Modal thêm/sửa tiện ích */}
+      {editingItem && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 space-y-4">
+            <h3 className="text-lg font-bold text-slate-900">
+              {editingItem.id ? 'Chỉnh sửa nội dung tiện ích' : 'Thêm nội dung tiện ích mới'}
+            </h3>
+            <div>
+              <label className="block text-xs font-bold uppercase text-slate-500 mb-1">Chuyên đề</label>
+              <input
+                type="text"
+                value={editingItem.topic}
+                onChange={(e) => setEditingItem({ ...editingItem, topic: e.target.value })}
+                className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold uppercase text-slate-500 mb-1">Tiêu đề / Tên thuật ngữ / Công thức</label>
+              <input
+                type="text"
+                value={editingItem.title}
+                onChange={(e) => setEditingItem({ ...editingItem, title: e.target.value })}
+                className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm font-bold"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold uppercase text-slate-500 mb-1">Nội dung chi tiết</label>
+              <textarea
+                rows={5}
+                value={editingItem.content}
+                onChange={(e) => setEditingItem({ ...editingItem, content: e.target.value })}
+                className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm"
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setEditingItem(null)} className="px-4 py-2 rounded-xl text-slate-600 hover:bg-slate-100">Hủy</button>
+              <button
+                onClick={async () => {
+                  if (!editingItem.title.trim() || !editingItem.content.trim()) return;
+                  if (editingItem.id) {
+                    await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'utilities', editingItem.id), editingItem);
+                    showToast('Đã cập nhật tiện ích!', 'success');
+                  } else {
+                    await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'utilities'), editingItem);
+                    showToast('Đã thêm tiện ích mới!', 'success');
+                  }
+                  setEditingItem(null);
+                }}
+                className="px-5 py-2 rounded-xl bg-emerald-600 text-white font-bold"
+              >
+                Lưu lại
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ==========================================
+// 10. MODULE 5: QUẢN LÝ & XÓA KẾT QUẢ LÀM BÀI CỦA HỌC SINH
+// ==========================================
+function ResultsSection({ results, role, showToast }) {
+  const [searchName, setSearchName] = useState('');
+
+  const filtered = results.filter((r) =>
+    !searchName.trim() ||
+    (r.studentName || '').toLowerCase().includes(searchName.toLowerCase()) ||
+    (r.studentClass || '').toLowerCase().includes(searchName.toLowerCase()) ||
+    (r.examTitle || '').toLowerCase().includes(searchName.toLowerCase())
+  );
+
+  const handleDeleteResult = async (id) => {
+    try {
+      await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'results', id));
+      showToast('Đã xóa bản ghi kết quả làm bài!', 'info');
+    } catch (err) {
+      showToast('Lỗi khi xóa kết quả!', 'error');
+    }
+  };
+
+  return (
+    <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+            <BarChart3 className="w-6 h-6 text-emerald-600" />
+            <span>Bảng Điểm & Lịch Sử Làm Bài Của Học Sinh</span>
+          </h2>
+          <p className="text-xs text-slate-500 mt-1">
+            Tự động lưu trữ điểm số sau mỗi lượt thi thử hoặc luyện chuyên đề.
+          </p>
+        </div>
+        <div className="relative w-full sm:w-72">
+          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+          <input
+            type="text"
+            value={searchName}
+            onChange={(e) => setSearchName(e.target.value)}
+            placeholder="Tìm theo tên học sinh, lớp, đề..."
+            className="w-full pl-10 pr-4 py-2 rounded-xl border border-slate-300 text-sm outline-none"
+          />
+        </div>
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="text-center py-12 text-slate-400">
+          <Award className="w-12 h-12 mx-auto mb-2 opacity-40" />
+          <p>Chưa có dữ liệu kết quả làm bài nào được ghi nhận.</p>
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="border-b border-slate-200 text-xs font-bold uppercase text-slate-500 bg-slate-50">
+                <th className="py-3 px-4">Học sinh</th>
+                <th className="py-3 px-4">Lớp</th>
+                <th className="py-3 px-4">Bài thi / Chuyên đề</th>
+                <th className="py-3 px-4 text-center">Số câu trọn vẹn</th>
+                <th className="py-3 px-4 text-center">Điểm (Thang 10)</th>
+                <th className="py-3 px-4">Thời gian nộp</th>
+                <th className="py-3 px-4 text-right">Thao tác</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 text-sm">
+              {filtered.map((r) => (
+                <tr key={r.id} className="hover:bg-slate-50/80">
+                  <td className="py-3.5 px-4 font-bold text-slate-900">{r.studentName}</td>
+                  <td className="py-3.5 px-4 text-slate-600">{r.studentClass}</td>
+                  <td className="py-3.5 px-4 text-slate-800 max-w-xs truncate">{r.examTitle}</td>
+                  <td className="py-3.5 px-4 text-center font-medium">{r.correctCount}/{r.totalQuestions}</td>
+                  <td className="py-3.5 px-4 text-center">
+                    <span className={`px-3 py-1 rounded-full font-extrabold text-xs ${
+                      r.score >= 8 ? 'bg-emerald-100 text-emerald-800' :
+                      r.score >= 5 ? 'bg-amber-100 text-amber-800' :
+                      'bg-rose-100 text-rose-800'
+                    }`}>
+                      {r.score} đ
+                    </span>
+                  </td>
+                  <td className="py-3.5 px-4 text-xs text-slate-500">
+                    {new Date(r.submittedAt).toLocaleString('vi-VN')}
+                  </td>
+                  <td className="py-3.5 px-4 text-right">
+                    <button
+                      onClick={() => handleDeleteResult(r.id)}
+                      className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg inline-flex items-center gap-1 text-xs font-semibold"
+                      title="Xóa kết quả này"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      <span>Xóa</span>
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
